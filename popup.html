@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Aura</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div id="app">
+
+    <!-- Header -->
+    <header>
+      <div class="logo">
+        <span class="logo-drop">💧</span>
+        <span class="logo-text">aura</span>
+      </div>
+      <button class="icon-btn" id="settings-btn" title="Settings">⚙️</button>
+    </header>
+
+    <!-- Auth Screen (shown when not signed in) -->
+    <div id="auth-screen" class="hidden">
+      <div class="auth-content">
+        <p class="auth-subtitle">Your AI fashion wardrobe</p>
+        <button id="google-signin-btn" class="google-btn">
+          <span class="google-icon">G</span> Sign in with Google
+        </button>
+        <p id="auth-error" class="auth-error hidden"></p>
+      </div>
+    </div>
+
+    <!-- Main App (hidden until signed in) -->
+    <div id="main-app" class="hidden">
+
+    <!-- API Key Warning Banner -->
+    <div id="api-warning" class="api-warning hidden">
+      ⚠️ No API key set. <a href="#" id="api-warning-link">Set Gemini Key →</a>
+    </div>
+
+    <!-- Navigation -->
+    <nav class="tabs">
+      <button class="tab-btn active" data-tab="detect">Detect</button>
+      <button class="tab-btn" data-tab="wardrobe">Wardrobe</button>
+      <button class="tab-btn" data-tab="avatar">Avatar</button>
+      <button class="tab-btn" data-tab="tryon">Try-On</button>
+      <button class="tab-btn" data-tab="looks">Looks</button>
+    </nav>
+
+    <!-- ===== DETECT TAB ===== -->
+    <section id="detect-tab" class="tab active">
+      <button id="scan-btn" class="primary-btn">🔍 Scan This Page</button>
+      <div id="detected-products">
+        <div class="empty-state">
+          <div class="empty-icon">👗</div>
+          <h3>Find clothes anywhere</h3>
+          <p>Navigate to any fashion website and hit Scan</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== WARDROBE TAB ===== -->
+    <section id="wardrobe-tab" class="tab">
+      <input type="text" id="wardrobe-search" placeholder="Search by name or brand..." class="wardrobe-search-input">
+      <div class="filters" id="category-filters">
+        <button class="filter-btn active" data-filter="all">All</button>
+        <button class="filter-btn" data-filter="top">Tops</button>
+        <button class="filter-btn" data-filter="bottom">Bottoms</button>
+        <button class="filter-btn" data-filter="dress">Dresses</button>
+        <button class="filter-btn" data-filter="shoes">Shoes</button>
+        <button class="filter-btn" data-filter="outerwear">Outerwear</button>
+        <button class="filter-btn" data-filter="accessory">Accessories</button>
+      </div>
+      <div id="wardrobe-grid"></div>
+      <div id="wardrobe-footer" class="wardrobe-footer hidden">
+        <button id="create-outfit-btn" class="primary-btn">✨ Try On Selected</button>
+      </div>
+    </section>
+
+    <!-- ===== AVATAR TAB ===== -->
+    <section id="avatar-tab" class="tab">
+      <div id="avatar-display" class="hidden"></div>
+
+      <div id="avatar-form">
+        <h3 class="form-title">Set Up Your Avatar</h3>
+
+        <div class="form-row">
+          <input type="text" id="avatar-name" placeholder="Your name" required>
+        </div>
+        <div class="file-upload" id="avatar-upload-area">
+          <input type="file" id="avatar-upload-input" accept="image/*" hidden>
+          <div id="avatar-upload-label" class="upload-label">
+            <span class="upload-icon">📷</span>
+            <span>Upload your photo</span>
+          </div>
+          <img id="avatar-upload-preview" class="photo-preview hidden" alt="Your photo">
+        </div>
+        <div class="photo-tips">
+          <p class="photo-tips-title">For best try-on results:</p>
+          <ul class="photo-tips-list">
+            <li>Full body visible — head to toe</li>
+            <li>Facing forward, in good lighting</li>
+            <li>Just you — no one else in frame</li>
+            <li>Fitted clothes (not oversized)</li>
+          </ul>
+        </div>
+
+        <p id="avatar-upload-required" class="photo-required-msg hidden">⚠️ Please upload a photo to generate your avatar.</p>
+
+        <button type="button" class="primary-btn" id="save-avatar-btn">Save Avatar</button>
+      </div>
+    </section>
+
+    <!-- ===== TRY ON TAB ===== -->
+    <section id="tryon-tab" class="tab">
+      <div class="tryon-avatar-section">
+        <h4 class="section-label">Your Avatar</h4>
+        <div id="tryon-avatar-preview"></div>
+      </div>
+
+      <div class="tryon-outfit-section">
+        <h4 class="section-label">Outfit <span id="selected-count"></span></h4>
+        <div id="selected-outfit-items" class="drop-zone">
+          <p class="drop-hint">Drag items here or select from Wardrobe</p>
+        </div>
+      </div>
+
+      <div class="tryon-drag-source">
+        <h4 class="section-label">Wardrobe — drag to add</h4>
+        <div id="tryon-wardrobe-strip"></div>
+      </div>
+
+      <button id="generate-outfit-btn" class="primary-btn">✨ Generate Try-On</button>
+
+      <div id="tryon-result"></div>
+    </section>
+
+    <!-- ===== LOOKS TAB ===== -->
+    <section id="looks-tab" class="tab">
+      <div id="looks-grid"></div>
+    </section>
+
+    </div><!-- #main-app -->
+
+  </div><!-- #app -->
+
+  <!-- Settings Modal -->
+  <div id="settings-modal" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>Settings</h3>
+        <button class="icon-btn" id="close-settings">✕</button>
+      </div>
+      <div class="modal-body">
+        <label class="settings-label">Gemini API Key</label>
+        <input type="password" id="api-key-input" placeholder="AIza..." autocomplete="off">
+        <p class="settings-hint">Get your key at <strong>aistudio.google.com</strong></p>
+        <div class="settings-actions">
+          <button id="save-api-key" class="primary-btn">Save Key</button>
+          <button id="clear-api-key" class="secondary-btn">Clear Key</button>
+        </div>
+        <div id="key-status" class="key-status"></div>
+        <hr style="border:none;border-top:1px solid #eee;margin:8px 0">
+        <button id="sign-out-btn" class="secondary-btn" style="width:100%">Sign Out</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="lib/supabase-client.js"></script>
+  <script src="lib/gemini-service.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

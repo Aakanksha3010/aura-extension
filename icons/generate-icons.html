@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Generate Drip Icons</title>
+  <style>
+    body { font-family: sans-serif; padding: 30px; background: #f5f5f5; }
+    h2 { margin-bottom: 20px; }
+    .icons { display: flex; gap: 30px; align-items: flex-end; flex-wrap: wrap; }
+    .icon-block { text-align: center; }
+    canvas { display: block; margin-bottom: 8px; border-radius: 20%; box-shadow: 0 4px 12px rgba(0,0,0,0.2); }
+    a.download { display: block; padding: 6px 12px; background: #000; color: #fff; border-radius: 6px; text-decoration: none; font-size: 13px; margin-top: 6px; }
+    a.download:hover { background: #333; }
+    p { color: #666; margin-top: 20px; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <h2>💧 Drip — Icon Generator</h2>
+  <div class="icons" id="icons"></div>
+  <p>Save all three files into the <code>icons/</code> folder of the extension.</p>
+
+  <script>
+    const sizes = [16, 48, 128];
+
+    sizes.forEach(size => {
+      const canvas = document.createElement('canvas');
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext('2d');
+      const r = size * 0.18;
+
+      // Background gradient
+      const grad = ctx.createLinearGradient(0, 0, size, size);
+      grad.addColorStop(0, '#111111');
+      grad.addColorStop(1, '#333333');
+
+      // Rounded rect
+      ctx.beginPath();
+      ctx.moveTo(r, 0);
+      ctx.lineTo(size - r, 0);
+      ctx.quadraticCurveTo(size, 0, size, r);
+      ctx.lineTo(size, size - r);
+      ctx.quadraticCurveTo(size, size, size - r, size);
+      ctx.lineTo(r, size);
+      ctx.quadraticCurveTo(0, size, 0, size - r);
+      ctx.lineTo(0, r);
+      ctx.quadraticCurveTo(0, 0, r, 0);
+      ctx.closePath();
+      ctx.fillStyle = grad;
+      ctx.fill();
+
+      // Gold accent dot (drop)
+      ctx.beginPath();
+      const cx = size * 0.5;
+      const cy = size * 0.42;
+      const dr = size * 0.22;
+      ctx.arc(cx, cy, dr, 0, Math.PI * 2);
+      ctx.fillStyle = '#FFD700';
+      ctx.fill();
+
+      // Drop tail
+      ctx.beginPath();
+      ctx.moveTo(cx - dr * 0.7, cy - dr * 0.1);
+      ctx.quadraticCurveTo(cx, cy + dr * 1.5, cx + dr * 0.7, cy - dr * 0.1);
+      ctx.fillStyle = '#FFD700';
+      ctx.fill();
+
+      // Letter "d" in white
+      if (size >= 48) {
+        ctx.fillStyle = '#000';
+        ctx.font = `bold ${size * 0.28}px Arial`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('d', cx, cy - dr * 0.05);
+      }
+
+      // Create download block
+      const block = document.createElement('div');
+      block.className = 'icon-block';
+      block.appendChild(canvas);
+
+      const label = document.createElement('span');
+      label.textContent = `${size}×${size}`;
+      label.style.fontSize = '12px';
+      label.style.color = '#666';
+      label.style.display = 'block';
+      block.appendChild(label);
+
+      const link = document.createElement('a');
+      link.href = canvas.toDataURL('image/png');
+      link.download = `icon${size}.png`;
+      link.className = 'download';
+      link.textContent = `⬇ icon${size}.png`;
+      block.appendChild(link);
+
+      document.getElementById('icons').appendChild(block);
+    });
+  </script>
+</body>
+</html>

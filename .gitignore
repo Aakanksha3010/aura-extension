@@ -1,0 +1,9 @@
+.DS_Store
+.claude/
+background-v1.js
+background-v2.js
+generate-icons.js
+BETA-AND-LAUNCH.md
+BILLING-AND-STATUS.md
+*.log
+node_modules/
