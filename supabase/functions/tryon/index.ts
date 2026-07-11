@@ -101,36 +101,36 @@ Deno.serve(async (req) => {
       `- Image ${i + 2}: "${descriptions[i]}" → applies to: ${bodyRegion(item.category)}`
     ).join('\n')
 
-    const prompt = `You are performing a high-fidelity virtual try-on task.
+    const prompt = `You are an expert photo EDITOR performing a virtual try-on. You are NOT generating a new image — you are EDITING the existing photograph in Image 1 and changing ONLY the clothing.
 
 INPUTS:
-- Image 1: the person (avatar). Use ONLY for their face, skin tone, body shape, pose, hair, and accessories.
+- Image 1: a photograph of the person. This exact photo is your canvas. Keep the person and the background as they are.
 ${garmentLines}
 
-OUTPUT: A single photorealistic image of the person wearing ALL of the clothing items listed above simultaneously as a complete outfit.
+TASK: Return Image 1, edited so the person wears ALL the garment(s) above as one complete outfit. Change ONLY the clothing pixels. Everything else must stay the SAME photograph.
 
-ABSOLUTE CONSTRAINTS (never violate):
-1. IDENTITY LOCK — preserve the person's face, features, skin tone, expression, and hair with ZERO alterations.
-2. GARMENT FIDELITY — reproduce the exact color, pattern, texture, and design details of EVERY clothing item with ZERO deviations.
-3. BODY REGION — apply each garment to exactly the body region specified above. A DRESS covers the full body — do NOT add pants or any separate bottom underneath it.
-4. COMPLETE OUTFIT — every garment from Images 2 onward must appear on the person. Do not omit any item.
-5. POSE PRESERVATION — keep the person's exact body pose and positioning.
-6. REALISTIC FIT — drape and fit each garment naturally with physically plausible folds and shadows.
-7. FULL BODY — keep the full body visible head to toe.
+IDENTITY LOCK (highest priority — never violate):
+- The face, facial features, expression, skin tone, hair and head must remain PIXEL-IDENTICAL to Image 1. Do NOT redraw, beautify, slim, age, or restyle the person in any way.
+- Keep the exact same body shape, proportions, pose and camera framing as Image 1.
+- If preserving the face perfectly conflicts with the garment, favor the face — an unchanged face matters more than a perfect garment.
 
-PROHIBITIONS:
-- Do NOT alter the person's face, identity, or skin tone.
-- Do NOT change any garment's color, pattern, or style.
-- Do NOT crop or cut off the person's head or feet.`
+GARMENT FIDELITY:
+- Reproduce each garment's exact color, pattern, texture and design from its image.
+- Apply each garment ONLY to its specified body region. A DRESS covers the full body — do NOT add a separate pant or skirt underneath.
+- Every garment listed must appear, draped naturally with realistic folds and shadows.
+
+OUTPUT: one photorealistic image — the SAME person and pose as Image 1, full body head-to-toe, with only the clothing changed. Do NOT crop the head or feet.`
 
     const garmentParts = clothingItems.map(item => ({
       inlineData: { mimeType: item.mimeType, data: item.base64 },
     }))
 
-    // Try Gemini models in order (best → fallback)
+    // Try Gemini models in order (best → fallback). gemini-2.5-flash-image
+    // ("nano banana") is the GA image-edit model — strongest at identity
+    // consistency and typically the fastest, so it goes first.
     const models = [
-      'gemini-2.5-flash-preview-image-generation',
       'gemini-2.5-flash-image',
+      'gemini-2.5-flash-preview-image-generation',
       'gemini-2.0-flash-preview-image-generation',
       'gemini-2.0-flash-exp',
     ]
@@ -157,7 +157,9 @@ PROHIBITIONS:
               }],
               generationConfig: {
                 responseModalities: ['IMAGE', 'TEXT'],
-                temperature: 0.6,
+                // Low temperature keeps the edit faithful to Image 1 (less
+                // creative drift = better identity preservation).
+                temperature: 0.25,
                 topP: 0.95,
                 topK: 40,
               },
