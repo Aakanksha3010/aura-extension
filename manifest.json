@@ -2,6 +2,7 @@
   "manifest_version": 3,
   "name": "Aura - Virtual Try-On",
   "version": "1.0.0",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAunrI331fYWuO7RKvfk5AwLKwlYPYJUQMT6fpBiLTLBWfPeGQyDqVIKcaAEH4dbNVJtijU8WgoeB4I3O9imT8iTuyVmwHjbEN0WVChSHAlFyPGJ7kbJkgnRfXuoYYawq/sJbkPYkLHvUKsHdsIjNScJw+NmDoUCdCVswy+Z2/p0KRADhcZ+Q/EJ1e6uvRKVNZ9MzSE6batjd+7pArwjtyFHgTfz+imIL1tJ5FQFOl29Y/udoAjcthD/hqxfaXdarE7uCMG2QPwMrPShQHZjZRI/1a7MRbxIMD9Gkx1eFIq+SDPsXLo9lP/zH1ZnBuDAsoGSzQ8VIQXIb/wmMNZC4oGwIDAQAB",
   "description": "Save clothes from any website and try them on your AI avatar using Google Gemini",
   "permissions": [
     "activeTab",

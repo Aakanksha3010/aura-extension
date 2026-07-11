@@ -7,3 +7,8 @@ BETA-AND-LAUNCH.md
 BILLING-AND-STATUS.md
 *.log
 node_modules/
+
+# Extension signing key — MUST NOT be committed (leaking it lets others publish
+# updates under this extension's identity).
+*.pem
+key.pem

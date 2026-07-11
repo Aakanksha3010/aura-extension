@@ -60,7 +60,7 @@ Deno.serve(async (req) => {
       if (avatar.photo_url) {
         const { data } = await admin.storage
           .from('avatars')
-          .createSignedUrl(avatar.photo_url, 3600)
+          .createSignedUrl(avatar.photo_url, 60 * 60 * 24 * 7)
         signedPhotoUrl = data?.signedUrl
       }
 
@@ -110,7 +110,7 @@ Deno.serve(async (req) => {
 
       const { data: signedData } = await admin.storage
         .from('avatars')
-        .createSignedUrl(storagePath, 3600)
+        .createSignedUrl(storagePath, 60 * 60 * 24 * 7)
 
       return json({ avatar: { ...avatar, signedPhotoUrl: signedData?.signedUrl } })
     }

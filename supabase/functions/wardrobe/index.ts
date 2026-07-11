@@ -69,7 +69,7 @@ Deno.serve(async (req) => {
           if (item.image_storage_path) {
             const { data } = await admin.storage
               .from('wardrobe-images')
-              .createSignedUrl(item.image_storage_path, 3600)
+              .createSignedUrl(item.image_storage_path, 60 * 60 * 24 * 7)
             return { ...item, signedImageUrl: data?.signedUrl }
           }
           return item
@@ -130,7 +130,7 @@ Deno.serve(async (req) => {
       if (imageStoragePath) {
         const { data } = await admin.storage
           .from('wardrobe-images')
-          .createSignedUrl(imageStoragePath, 3600)
+          .createSignedUrl(imageStoragePath, 60 * 60 * 24 * 7)
         signedImageUrl = data?.signedUrl
       }
 
