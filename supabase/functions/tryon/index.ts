@@ -223,7 +223,7 @@ PROHIBITIONS:
     // Generate 1-hour signed URL
     const { data: signedData } = await admin.storage
       .from('tryon-results')
-      .createSignedUrl(storagePath, 3600)
+      .createSignedUrl(storagePath, 60 * 60 * 24 * 7)
 
     return json({ signedUrl: signedData?.signedUrl, storagePath })
 

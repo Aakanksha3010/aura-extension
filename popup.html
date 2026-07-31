@@ -32,11 +32,6 @@
     <!-- Main App (hidden until signed in) -->
     <div id="main-app" class="hidden">
 
-    <!-- API Key Warning Banner -->
-    <div id="api-warning" class="api-warning hidden">
-      ⚠️ No API key set. <a href="#" id="api-warning-link">Set Gemini Key →</a>
-    </div>
-
     <!-- Navigation -->
     <nav class="tabs">
       <button class="tab-btn active" data-tab="detect">Detect</button>
@@ -129,6 +124,7 @@
         <div id="tryon-wardrobe-strip"></div>
       </div>
 
+      <p id="tryon-counter" class="tryon-counter"></p>
       <button id="generate-outfit-btn" class="primary-btn">✨ Generate Try-On</button>
 
       <div id="tryon-result"></div>
@@ -152,15 +148,6 @@
         <button class="icon-btn" id="close-settings">✕</button>
       </div>
       <div class="modal-body">
-        <label class="settings-label">Gemini API Key</label>
-        <input type="password" id="api-key-input" placeholder="AIza..." autocomplete="off">
-        <p class="settings-hint">Get your key at <strong>aistudio.google.com</strong></p>
-        <div class="settings-actions">
-          <button id="save-api-key" class="primary-btn">Save Key</button>
-          <button id="clear-api-key" class="secondary-btn">Clear Key</button>
-        </div>
-        <div id="key-status" class="key-status"></div>
-        <hr style="border:none;border-top:1px solid #eee;margin:8px 0">
         <button id="sign-out-btn" class="secondary-btn" style="width:100%">Sign Out</button>
       </div>
     </div>

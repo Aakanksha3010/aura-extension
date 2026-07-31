@@ -3,6 +3,7 @@
 // ===== STATE =====
 let wardrobe = [];
 let avatar = null;
+let profile = null;
 let selectedItems = new Set(); // item IDs selected for try-on
 let currentFilter = 'all';
 
@@ -76,6 +77,7 @@ async function loadState() {
     avatar = null;
     window._wardrobeLoadError = err.message;
   }
+  profile = await fetchProfile().catch(() => null);
 
   // Pick up any item saved via right-click context menu
   const { pendingContextItem } = await new Promise(resolve =>
@@ -144,7 +146,7 @@ async function scanPage() {
           <div class="empty-state">
             <div class="empty-icon">🔍</div>
             <h3>Nothing detected</h3>
-            <p>Try a fashion website like SSENSE, ASOS, Farfetch, or Zara</p>
+            <p>Open a product page (not a homepage), wait for it to fully load, then scan again. Works best on Myntra, H&M, ASOS, and SSENSE.</p>
           </div>`;
       } else {
         renderDetectedProducts(products, container);
@@ -212,9 +214,7 @@ async function saveProduct(product, btn) {
     imageBase64 = product.imageBase64;
     imageMimeType = product.imageMimeType || 'image/jpeg';
   } else {
-    const imgResult = await new Promise(resolve =>
-      chrome.runtime.sendMessage({ action: 'fetchImageAsBase64', url: product.imageUrl }, resolve)
-    );
+    const imgResult = await _sendMessageWithTimeout({ action: 'fetchImageAsBase64', url: product.imageUrl });
     imageBase64 = imgResult?.success ? imgResult.data.base64 : null;
     imageMimeType = imgResult?.success ? imgResult.data.mimeType : 'image/jpeg';
   }
@@ -493,6 +493,23 @@ function renderTryOnTab() {
     });
   }
 
+  // Try-on counter
+  const counter = document.getElementById('tryon-counter');
+  if (counter) {
+    if (profile) {
+      const remaining = (profile.try_on_limit || 25) - (profile.try_on_count || 0);
+      if (remaining <= 0) {
+        counter.innerHTML = `No try-ons remaining. <a href="mailto:aakankshagyan3010@gmail.com?subject=Aura%20Pro%20Access" style="color:#000;font-weight:600">Join the Pro waitlist →</a>`;
+        counter.className = 'tryon-counter tryon-counter--warn';
+      } else {
+        counter.textContent = `${remaining} of ${profile.try_on_limit} try-ons remaining`;
+        counter.className = remaining <= 5 ? 'tryon-counter tryon-counter--low' : 'tryon-counter';
+      }
+    } else {
+      counter.textContent = '';
+    }
+  }
+
   // Wardrobe drag strip
   strip.innerHTML = '';
   if (wardrobe.length === 0) {
@@ -619,9 +636,7 @@ async function handleTryOn() {
       let mimeType = item.imageMimeType || 'image/jpeg';
 
       if (!base64) {
-        const fetched = await new Promise(resolve =>
-          chrome.runtime.sendMessage({ action: 'fetchImageAsBase64', url: item.imageUrl }, resolve)
-        );
+        const fetched = await _sendMessageWithTimeout({ action: 'fetchImageAsBase64', url: item.imageUrl });
         if (fetched?.success) {
           base64 = fetched.data.base64;
           mimeType = fetched.data.mimeType;
@@ -647,6 +662,7 @@ async function handleTryOn() {
 
     const tryOnResult = await generateTryOnRemote(avatar, validItems);
     const imageUrl = tryOnResult?.imageUrl;
+    const storagePath = tryOnResult?.storagePath || null;
 
     if (imageUrl) {
       const warningHtml = failedItems.length > 0
@@ -656,9 +672,14 @@ async function handleTryOn() {
       result.innerHTML = `
         ${warningHtml}
         <img id="tryon-result-img" alt="Virtual Try-On">
-        <button class="secondary-btn" id="save-look-btn">💾 Save This Look</button>
+        <div class="tryon-result-actions">
+          <button class="secondary-btn" id="retry-tryon-btn">↺ Try Again</button>
+          <button class="secondary-btn" id="save-look-btn">💾 Save This Look</button>
+        </div>
       `;
       document.getElementById('tryon-result-img').src = imageUrl;
+
+      document.getElementById('retry-tryon-btn').addEventListener('click', handleTryOn);
 
       document.getElementById('save-look-btn').addEventListener('click', async () => {
         const outfits = (await chromeGet('local', ['outfits'])).outfits || [];
@@ -666,20 +687,41 @@ async function handleTryOn() {
           id: `outfit_${Date.now()}`,
           items: selected.map(i => i.id),
           generatedImageUrl: imageUrl,
+          storagePath,
           createdAt: Date.now()
         });
         await chromeSet('local', { outfits });
         document.getElementById('save-look-btn').textContent = '✓ Saved!';
         document.getElementById('save-look-btn').disabled = true;
       });
+
+      // Optimistic update of local counter
+      if (profile) {
+        profile.try_on_count = (profile.try_on_count || 0) + 1;
+        renderTryOnTab();
+      }
     }
   } catch (err) {
-    result.innerHTML = `
-      <div class="empty-state">
-        <div class="empty-icon">⚠️</div>
-        <h3>Try-on failed</h3>
-        <p>${esc(err.message)}</p>
-      </div>`;
+    const isLimitHit = err.message.toLowerCase().includes('limit');
+    if (isLimitHit) {
+      result.innerHTML = `
+        <div class="empty-state">
+          <div class="empty-icon">✨</div>
+          <h3>Free limit reached</h3>
+          <p>You've used all your free try-ons. <a href="mailto:aakankshagyan3010@gmail.com?subject=Aura%20Pro%20Access" style="color:#000;font-weight:600">Join the Pro waitlist →</a></p>
+        </div>`;
+      if (profile) profile.try_on_count = profile.try_on_limit;
+      renderTryOnTab();
+    } else {
+      result.innerHTML = `
+        <div class="empty-state">
+          <div class="empty-icon">⚠️</div>
+          <h3>Try-on failed</h3>
+          <p>${esc(err.message)}</p>
+          <button class="secondary-btn" id="retry-tryon-btn" style="margin-top:8px">↺ Try Again</button>
+        </div>`;
+      document.getElementById('retry-tryon-btn')?.addEventListener('click', handleTryOn);
+    }
   }
 
   btn.textContent = '✨ Generate Try-On';
@@ -691,64 +733,18 @@ function setupSettings() {
   const modal = document.getElementById('settings-modal');
   const backdrop = modal.querySelector('.modal-backdrop');
 
-  document.getElementById('settings-btn').addEventListener('click', async () => {
+  document.getElementById('settings-btn').addEventListener('click', () => {
     modal.classList.remove('hidden');
-    const { geminiApiKey } = await chromeGet('local', ['geminiApiKey']);
-    if (geminiApiKey) {
-      document.getElementById('api-key-input').value = geminiApiKey;
-    }
-    document.getElementById('key-status').textContent = '';
   });
 
   const closeModal = () => modal.classList.add('hidden');
   document.getElementById('close-settings').addEventListener('click', closeModal);
   backdrop.addEventListener('click', closeModal);
 
-  document.getElementById('save-api-key').addEventListener('click', async () => {
-    const key = document.getElementById('api-key-input').value.trim();
-    const status = document.getElementById('key-status');
-
-    if (!key) {
-      status.textContent = 'Please enter an API key.';
-      status.className = 'key-status error';
-      return;
-    }
-
-    await chromeSet('local', { geminiApiKey: key });
-    status.textContent = '✓ Key saved!';
-    status.className = 'key-status success';
-
-    document.getElementById('api-warning')?.classList.add('hidden');
-    setTimeout(closeModal, 1000);
-  });
-
-  document.getElementById('clear-api-key').addEventListener('click', async () => {
-    const status = document.getElementById('key-status');
-    await new Promise(resolve => chrome.storage.local.remove('geminiApiKey', resolve));
-    document.getElementById('api-key-input').value = '';
-    status.textContent = 'Key cleared.';
-    status.className = 'key-status';
-    document.getElementById('api-warning')?.classList.remove('hidden');
-  });
-
-  document.getElementById('api-warning-link')?.addEventListener('click', e => {
-    e.preventDefault();
-    document.getElementById('settings-btn').click();
-  });
-
   document.getElementById('sign-out-btn').addEventListener('click', async () => {
     await signOut();
     showAuthScreen();
   });
-}
-
-async function checkApiKey() {
-  const { geminiApiKey } = await chromeGet('local', ['geminiApiKey']);
-  if (!geminiApiKey) {
-    document.getElementById('api-warning').classList.remove('hidden');
-  } else {
-    document.getElementById('api-warning').classList.add('hidden');
-  }
 }
 
 // ===== UTILS =====
