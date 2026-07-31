@@ -7,3 +7,7 @@ BETA-AND-LAUNCH.md
 BILLING-AND-STATUS.md
 *.log
 node_modules/
+
+# Chrome extension signing key — never commit
+*.pem
+key.pem
