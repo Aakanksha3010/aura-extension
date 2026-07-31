@@ -104,23 +104,25 @@ Deno.serve(async (req) => {
     const prompt = `You are performing a high-fidelity virtual try-on task.
 
 INPUTS:
-- Image 1: the person (avatar). Use ONLY for their face, skin tone, body shape, pose, hair, and accessories.
+- Image 1: the person (avatar). Use ONLY for their face, skin tone, body shape, pose, and hair. IGNORE everything the person is currently wearing — their existing clothes, jackets, scarves, dupattas, shawls, drapes, and worn accessories are NOT part of the output.
 ${garmentLines}
 
-OUTPUT: A single photorealistic image of the person wearing ALL of the clothing items listed above simultaneously as a complete outfit.
+OUTPUT: A single photorealistic image of the person, stripped of their original outfit and re-dressed in ONLY the clothing items listed above, worn together as a complete outfit.
 
 ABSOLUTE CONSTRAINTS (never violate):
 1. IDENTITY LOCK — preserve the person's face, features, skin tone, expression, and hair with ZERO alterations.
-2. GARMENT FIDELITY — reproduce the exact color, pattern, texture, and design details of EVERY clothing item with ZERO deviations.
-3. BODY REGION — apply each garment to exactly the body region specified above. A DRESS covers the full body — do NOT add pants or any separate bottom underneath it.
-4. COMPLETE OUTFIT — every garment from Images 2 onward must appear on the person. Do not omit any item.
-5. POSE PRESERVATION — keep the person's exact body pose and positioning.
-6. REALISTIC FIT — drape and fit each garment naturally with physically plausible folds and shadows.
-7. FULL BODY — keep the full body visible head to toe.
+2. REPLACE ORIGINAL CLOTHING — completely remove the person's entire original outfit. NONE of their original garments may remain visible: no original tops, bottoms, dresses, jackets, scarves, dupattas, shawls, drapes, or fabric of any kind. The person must wear ONLY the specified garments — nothing from the input photo's clothing.
+3. GARMENT FIDELITY — reproduce the exact color, pattern, texture, and design details of EVERY clothing item with ZERO deviations.
+4. BODY REGION — apply each garment to exactly the body region specified above. A DRESS covers the full body — do NOT add pants or any separate bottom underneath it.
+5. COMPLETE OUTFIT — every garment from Images 2 onward must appear on the person. Do not omit any item.
+6. POSE PRESERVATION — keep the person's exact body pose and positioning.
+7. REALISTIC FIT — drape and fit each garment naturally with physically plausible folds and shadows.
+8. FULL BODY — keep the full body visible head to toe.
 
 PROHIBITIONS:
 - Do NOT alter the person's face, identity, or skin tone.
 - Do NOT change any garment's color, pattern, or style.
+- Do NOT keep, show, or blend in ANY part of the person's original clothing, scarves, dupattas, or drapes.
 - Do NOT crop or cut off the person's head or feet.`
 
     const garmentParts = clothingItems.map(item => ({

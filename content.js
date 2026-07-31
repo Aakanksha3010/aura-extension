@@ -63,7 +63,7 @@
     if (!name) return 'accessory';
     const l = name.toLowerCase();
     if (/shirt|blouse|\btop\b|t-shirt|tshirt|sweater|hoodie|tee|tank|crop|bra|turtleneck|polo|button.up|button.down|sweatshirt|long.sleeve|crewneck|pullover|knitwear|knit.top|camisole|cami|tunic|henley|flannel|linen.shirt/.test(l)) return 'top';
-    if (/pant|jean|denim|skirt|short|trouser|legging|chino|cargo|jogger|sweatpant|palazzo|culottes|flare|bootcut|slim.fit|straight.fit|wide.leg|trackpant|cycling.short/.test(l)) return 'bottom';
+    if (/pant|jean|denim|skirt|\bshorts\b|bermuda|trouser|legging|chino|cargo|jogger|sweatpant|palazzo|culottes|bootcut|wide.leg|trackpant|cycling.short/.test(l)) return 'bottom';
     if (/shoe|boot|sneaker|sandal|heel|loafer|flat|mule|pump|ultraboost|air.max|air.force|chuck|jordan|dunk|trainer|running.shoe|court.shoe|oxford|derby|stiletto|wedge|platform.shoe|slipper|flip.flop|espadrille/.test(l)) return 'shoes';
     if (/jacket|coat|blazer|cardigan|vest|parka|trench|overcoat|windbreaker|bomber|anorak|fleece|shacket|peacoat|duster|raincoat/.test(l)) return 'outerwear';
     if (/dress|gown|jumpsuit|romper|bodysuit|co.ord|saree|kurta|lehenga|salwar|anarkali|maxi|midi.dress|mini.dress/.test(l)) return 'dress';

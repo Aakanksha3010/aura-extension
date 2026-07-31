@@ -1,0 +1,13 @@
+item,brand,category,difficulty,color,pattern,silhouette,details,item_fidelity,notes
+CHOKER EFFECT LAYERED T-SHIRT,Zara,top,hard,,,,,,draped/asymmetric — expect drift
+SHORT SLEEVE BLAZER WITH SHOULDER PADS,Zara,outerwear,medium,,,,,,
+Women's Dark Purple Wide-Leg Pants,,bottom,easy,,,,,,
+,,,,,,,,,
+,,,,,,,,,
+,,,,,,,,,
+,,,,,,,,,
+,,,,,,,,,
+,,,,,,,,,
+,,,,,,,,,
+# Fill 0 or 1 for color/pattern/silhouette/details. item_fidelity = sum of the 4 ÷ 4.
+# Overall garment fidelity % = mean(item_fidelity) × 100.
