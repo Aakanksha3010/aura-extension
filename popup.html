@@ -12,11 +12,21 @@
     <!-- Header -->
     <header>
       <div class="logo">
-        <span class="logo-drop">💧</span>
-        <span class="logo-text">aura</span>
+        <span class="logo-text">Aura</span>
       </div>
-      <button class="icon-btn" id="settings-btn" title="Settings">⚙️</button>
+      <button class="icon-btn" id="settings-btn" title="Settings" aria-label="Settings">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="3"></circle>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+        </svg>
+      </button>
     </header>
+
+    <!-- Boot state — visible immediately so the popup is never a blank white box
+         while getUser() and loadState() are in flight. -->
+    <div id="boot-screen">
+      <div class="loader"><div class="spinner"></div><span>Loading your wardrobe</span></div>
+    </div>
 
     <!-- Auth Screen (shown when not signed in) -->
     <div id="auth-screen" class="hidden">
@@ -43,10 +53,15 @@
 
     <!-- ===== DETECT TAB ===== -->
     <section id="detect-tab" class="tab active">
-      <button id="scan-btn" class="primary-btn">🔍 Scan This Page</button>
+      <button id="scan-btn" class="primary-btn">Scan This Page</button>
       <div id="detected-products">
         <div class="empty-state">
-          <div class="empty-icon">👗</div>
+          <div class="empty-icon">
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M12 4.5a1.75 1.75 0 1 0-1.75 1.75c.97 0 1.75.78 1.75 1.75v1.2"></path>
+              <path d="M12 9.2 3.6 15.3a1.2 1.2 0 0 0 .7 2.2h15.4a1.2 1.2 0 0 0 .7-2.2L12 9.2Z"></path>
+            </svg>
+          </div>
           <h3>Find clothes anywhere</h3>
           <p>Navigate to any fashion website and hit Scan</p>
         </div>
@@ -67,7 +82,7 @@
       </div>
       <div id="wardrobe-grid"></div>
       <div id="wardrobe-footer" class="wardrobe-footer hidden">
-        <button id="create-outfit-btn" class="primary-btn">✨ Try On Selected</button>
+        <button id="create-outfit-btn" class="primary-btn">Try On Selected</button>
       </div>
     </section>
 
@@ -84,7 +99,12 @@
         <div class="file-upload" id="avatar-upload-area">
           <input type="file" id="avatar-upload-input" accept="image/*" hidden>
           <div id="avatar-upload-label" class="upload-label">
-            <span class="upload-icon">📷</span>
+            <span class="upload-icon">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M3 8.5h3.5L8 6h8l1.5 2.5H21v11H3v-11Z"></path>
+                <circle cx="12" cy="13.5" r="3.5"></circle>
+              </svg>
+            </span>
             <span>Upload your photo</span>
           </div>
           <img id="avatar-upload-preview" class="photo-preview hidden" alt="Your photo">
@@ -99,7 +119,7 @@
           </ul>
         </div>
 
-        <p id="avatar-upload-required" class="photo-required-msg hidden">⚠️ Please upload a photo to generate your avatar.</p>
+        <p id="avatar-upload-required" class="photo-required-msg hidden">Please upload a photo to generate your avatar.</p>
 
         <button type="button" class="primary-btn" id="save-avatar-btn">Save Avatar</button>
       </div>
@@ -125,7 +145,7 @@
       </div>
 
       <p id="tryon-counter" class="tryon-counter"></p>
-      <button id="generate-outfit-btn" class="primary-btn">✨ Generate Try-On</button>
+      <button id="generate-outfit-btn" class="primary-btn">Generate Try-On</button>
 
       <div id="tryon-result"></div>
     </section>
@@ -145,7 +165,11 @@
     <div class="modal-content">
       <div class="modal-header">
         <h3>Settings</h3>
-        <button class="icon-btn" id="close-settings">✕</button>
+        <button class="icon-btn" id="close-settings" aria-label="Close">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
+            <path d="M5 5l14 14M19 5L5 19"></path>
+          </svg>
+        </button>
       </div>
       <div class="modal-body">
         <button id="sign-out-btn" class="secondary-btn" style="width:100%">Sign Out</button>
@@ -154,7 +178,6 @@
   </div>
 
   <script src="lib/supabase-client.js"></script>
-  <script src="lib/gemini-service.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

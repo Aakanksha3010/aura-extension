@@ -1,5 +1,18 @@
 // popup.js — Main popup logic for Aura extension
 
+// ===== ICONS =====
+// Inline SVG line glyphs — icon-font CDNs are blocked by the MV3 content security policy.
+const svgIcon = (paths, size = 40) =>
+  `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
+
+const ICON = {
+  alert: svgIcon('<circle cx="12" cy="12" r="9"></circle><path d="M12 7.5v5"></path><path d="M12 16h.01"></path>'),
+  search: svgIcon('<circle cx="10.5" cy="10.5" r="6.5"></circle><path d="M15.5 15.5 21 21"></path>'),
+  hanger: svgIcon('<path d="M12 4.5a1.75 1.75 0 1 0-1.75 1.75c.97 0 1.75.78 1.75 1.75v1.2"></path><path d="M12 9.2 3.6 15.3a1.2 1.2 0 0 0 .7 2.2h15.4a1.2 1.2 0 0 0 .7-2.2L12 9.2Z"></path>'),
+  person: svgIcon('<circle cx="12" cy="8" r="4"></circle><path d="M4.5 20a7.5 7.5 0 0 1 15 0"></path>'),
+  sparkle: svgIcon('<path d="M12 3.5 13.8 9 19.5 12 13.8 15 12 20.5 10.2 15 4.5 12 10.2 9 12 3.5Z"></path>'),
+};
+
 // ===== STATE =====
 let wardrobe = [];
 let avatar = null;
@@ -10,21 +23,33 @@ let currentFilter = 'all';
 // ===== INIT =====
 document.addEventListener('DOMContentLoaded', async () => {
   setupAuth();
-  const user = await getUser();
-  if (!user) {
+  try {
+    const user = await getUser();
+    if (!user) {
+      showAuthScreen();
+      return;
+    }
+    await loadState();
+    showMainApp();
+  } catch (err) {
+    // Never leave the boot spinner up forever — fall back to sign-in.
+    console.error('Startup failed:', err);
     showAuthScreen();
-    return;
   }
-  await loadState();
-  showMainApp();
 });
 
+function hideBootScreen() {
+  document.getElementById('boot-screen').classList.add('hidden');
+}
+
 function showAuthScreen() {
+  hideBootScreen();
   document.getElementById('auth-screen').classList.remove('hidden');
   document.getElementById('main-app').classList.add('hidden');
 }
 
 function showMainApp() {
+  hideBootScreen();
   document.getElementById('auth-screen').classList.add('hidden');
   document.getElementById('main-app').classList.remove('hidden');
   setupTabs();
@@ -69,15 +94,24 @@ function setupAuth() {
 }
 
 async function loadState() {
-  try {
-    [wardrobe, avatar] = await Promise.all([fetchWardrobe(), fetchAvatar()]);
-  } catch (err) {
-    console.error('Failed to load from Supabase:', err);
-    wardrobe = [];
-    avatar = null;
-    window._wardrobeLoadError = err.message;
+  // All three run concurrently — fetchProfile used to wait on the other two,
+  // adding a whole serial round-trip to every popup open. allSettled so one
+  // failure can't blank the others.
+  const [wardrobeRes, avatarRes, profileRes] = await Promise.allSettled([
+    fetchWardrobe(),
+    fetchAvatar(),
+    fetchProfile(),
+  ]);
+
+  wardrobe = wardrobeRes.status === 'fulfilled' ? wardrobeRes.value : [];
+  avatar = avatarRes.status === 'fulfilled' ? avatarRes.value : null;
+  profile = profileRes.status === 'fulfilled' ? profileRes.value : null;
+
+  const loadFailure = wardrobeRes.reason ?? avatarRes.reason;
+  if (loadFailure) {
+    console.error('Failed to load from Supabase:', loadFailure);
+    window._wardrobeLoadError = loadFailure.message;
   }
-  profile = await fetchProfile().catch(() => null);
 
   // Pick up any item saved via right-click context menu
   const { pendingContextItem } = await new Promise(resolve =>
@@ -125,9 +159,9 @@ async function scanPage() {
   const btn = document.getElementById('scan-btn');
   const container = document.getElementById('detected-products');
 
-  btn.textContent = '⏳ Scanning...';
+  btn.textContent = 'Scanning…';
   btn.disabled = true;
-  container.innerHTML = '<div class="loader"><div class="spinner"></div><span>Detecting clothing items...</span></div>';
+  container.innerHTML = '<div class="loader"><div class="spinner"></div><span>Detecting clothing items</span></div>';
 
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -138,25 +172,25 @@ async function scanPage() {
     chrome.tabs.sendMessage(tab.id, { action: 'aura_detect' }, response => {
       const products = response?.products || [];
       if (response?.error) {
-        container.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><h3>Scan error</h3><p>${esc(response.error)}</p></div>`;
+        container.innerHTML = `<div class="empty-state"><div class="empty-icon">${ICON.alert}</div><h3>Scan error</h3><p>${esc(response.error)}</p></div>`;
       } else if (!response) {
-        container.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><h3>No response</h3><p>Please refresh the page and try again.</p></div>`;
+        container.innerHTML = `<div class="empty-state"><div class="empty-icon">${ICON.alert}</div><h3>No response</h3><p>Please refresh the page and try again.</p></div>`;
       } else if (products.length === 0) {
         container.innerHTML = `
           <div class="empty-state">
-            <div class="empty-icon">🔍</div>
+            <div class="empty-icon">${ICON.search}</div>
             <h3>Nothing detected</h3>
             <p>Open a product page (not a homepage), wait for it to fully load, then scan again. Works best on Myntra, H&M, ASOS, and SSENSE.</p>
           </div>`;
       } else {
         renderDetectedProducts(products, container);
       }
-      btn.textContent = '🔍 Scan This Page';
+      btn.textContent = 'Scan This Page';
       btn.disabled = false;
     });
   } catch (err) {
-    container.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><h3>Scan failed</h3><p>${err.message}</p></div>`;
-    btn.textContent = '🔍 Scan This Page';
+    container.innerHTML = `<div class="empty-state"><div class="empty-icon">${ICON.alert}</div><h3>Scan failed</h3><p>${err.message}</p></div>`;
+    btn.textContent = 'Scan This Page';
     btn.disabled = false;
   }
 }
@@ -182,7 +216,7 @@ function renderDetectedProducts(products, container) {
         </div>
       </div>
       <button class="save-btn ${alreadySaved ? 'saved' : ''}" ${alreadySaved ? 'disabled' : ''}>
-        ${alreadySaved ? '✓ In Wardrobe' : '＋ Save to Wardrobe'}
+        ${alreadySaved ? 'In Wardrobe' : 'Save to Wardrobe'}
       </button>
     `;
 
@@ -199,7 +233,7 @@ async function saveProduct(product, btn) {
     w => w.productUrl === product.productUrl || w.name === product.name
   );
   if (duplicate) {
-    btn.textContent = '✓ In Wardrobe';
+    btn.textContent = 'In Wardrobe';
     btn.classList.add('saved');
     btn.disabled = true;
     return;
@@ -232,7 +266,7 @@ async function saveProduct(product, btn) {
       source: product.source,
     });
     wardrobe.push(saved);
-    btn.textContent = '✓ In Wardrobe';
+    btn.textContent = 'In Wardrobe';
     btn.classList.add('saved');
     btn.disabled = true;
     // Remove any previous error
@@ -296,7 +330,7 @@ function renderWardrobe() {
           : { title: 'No items in this category', hint: 'Try a different filter' };
     grid.innerHTML = `
       <div class="empty-state" style="grid-column:1/-1">
-        <div class="empty-icon">${loadErr ? '⚠️' : '👗'}</div>
+        <div class="empty-icon">${loadErr ? ICON.alert : ICON.hanger}</div>
         <h3>${emptyMsg.title}</h3>
         <p>${esc(emptyMsg.hint)}</p>
       </div>`;
@@ -338,7 +372,7 @@ function renderWardrobe() {
   if (selectedItems.size > 0) {
     footer.classList.remove('hidden');
     document.getElementById('create-outfit-btn').textContent =
-      `✨ Try On Selected (${selectedItems.size})`;
+      `Try On Selected (${selectedItems.size})`;
   } else {
     footer.classList.add('hidden');
   }
@@ -407,7 +441,7 @@ function renderAvatarTab() {
       <img id="avatar-display-img" alt="Your Avatar">
       <p class="avatar-name-display">${esc(avatar.name)}</p>
       <div class="avatar-actions">
-        <button class="secondary-btn" id="change-avatar-btn">&#8635; Change Avatar</button>
+        <button class="secondary-btn" id="change-avatar-btn">Change Avatar</button>
       </div>
     `;
     document.getElementById('avatar-display-img').src = avatar.photoUrl;
@@ -461,7 +495,7 @@ function renderTryOnTab() {
   } else {
     avatarSection.innerHTML = `
       <div class="empty-state" style="padding:20px">
-        <div class="empty-icon">👤</div>
+        <div class="empty-icon">${ICON.person}</div>
         <p>No avatar yet — <a href="#" id="go-to-avatar" style="color:#000;font-weight:600">create one first</a></p>
       </div>`;
     document.getElementById('go-to-avatar')?.addEventListener('click', e => {
@@ -549,7 +583,7 @@ async function renderLooksTab() {
   if (looks.length === 0) {
     grid.innerHTML = `
       <div class="empty-state" style="grid-column:1/-1">
-        <div class="empty-icon">✨</div>
+        <div class="empty-icon">${ICON.sparkle}</div>
         <h3>No saved looks yet</h3>
         <p>Generate a try-on and hit "Save This Look"</p>
       </div>`;
@@ -577,7 +611,7 @@ async function renderLooksTab() {
     const del = document.createElement('button');
     del.className = 'look-delete-btn';
     del.title = 'Delete look';
-    del.textContent = '🗑';
+    del.textContent = 'Delete';
     del.addEventListener('click', async () => {
       const { outfits: current } = await chromeGet('local', ['outfits']);
       await chromeSet('local', { outfits: (current || []).filter(o => o.id !== look.id) });
@@ -666,15 +700,15 @@ async function handleTryOn() {
 
     if (imageUrl) {
       const warningHtml = failedItems.length > 0
-        ? `<p class="tryon-warning">⚠️ Could not load ${failedItems.length} item(s): ${failedItems.map(i => esc(i.name)).join(', ')}. Re-save from Detect tab to include them.</p>`
+        ? `<p class="tryon-warning">Could not load ${failedItems.length} item(s): ${failedItems.map(i => esc(i.name)).join(', ')}. Re-save from Detect tab to include them.</p>`
         : '';
 
       result.innerHTML = `
         ${warningHtml}
         <img id="tryon-result-img" alt="Virtual Try-On">
         <div class="tryon-result-actions">
-          <button class="secondary-btn" id="retry-tryon-btn">↺ Try Again</button>
-          <button class="secondary-btn" id="save-look-btn">💾 Save This Look</button>
+          <button class="secondary-btn" id="retry-tryon-btn">Try Again</button>
+          <button class="secondary-btn" id="save-look-btn">Save This Look</button>
         </div>
       `;
       document.getElementById('tryon-result-img').src = imageUrl;
@@ -706,7 +740,7 @@ async function handleTryOn() {
     if (isLimitHit) {
       result.innerHTML = `
         <div class="empty-state">
-          <div class="empty-icon">✨</div>
+          <div class="empty-icon">${ICON.sparkle}</div>
           <h3>Free limit reached</h3>
           <p>You've used all your free try-ons. <a href="mailto:aakankshagyan3010@gmail.com?subject=Aura%20Pro%20Access" style="color:#000;font-weight:600">Join the Pro waitlist →</a></p>
         </div>`;
@@ -715,16 +749,16 @@ async function handleTryOn() {
     } else {
       result.innerHTML = `
         <div class="empty-state">
-          <div class="empty-icon">⚠️</div>
+          <div class="empty-icon">${ICON.alert}</div>
           <h3>Try-on failed</h3>
           <p>${esc(err.message)}</p>
-          <button class="secondary-btn" id="retry-tryon-btn" style="margin-top:8px">↺ Try Again</button>
+          <button class="secondary-btn" id="retry-tryon-btn">Try Again</button>
         </div>`;
       document.getElementById('retry-tryon-btn')?.addEventListener('click', handleTryOn);
     }
   }
 
-  btn.textContent = '✨ Generate Try-On';
+  btn.textContent = 'Generate Try-On';
   btn.disabled = false;
 }
 
