@@ -73,6 +73,22 @@ Deno.serve(async (req) => {
     const { data: { user }, error: authError } = await supabase.auth.getUser()
     if (authError || !user) return json({ error: 'Unauthorized' }, 401)
 
+    // Safety net: ensure this user has a profiles row before the rate-limit
+    // lookup below. A missing row (signup trigger absent or failed) would
+    // otherwise 404 every try-on. ignoreDuplicates → ON CONFLICT DO NOTHING,
+    // so an existing profile's try_on_count is never reset.
+    const { error: profileError } = await admin
+      .from('profiles')
+      .upsert(
+        {
+          id: user.id,
+          email: user.email ?? `${user.id}@placeholder.local`,
+          name: user.user_metadata?.full_name ?? null,
+        },
+        { onConflict: 'id', ignoreDuplicates: true }
+      )
+    if (profileError) console.warn('Profile ensure failed:', profileError.message)
+
     // Rate limit check
     const { data: profile } = await supabase
       .from('profiles')
@@ -104,7 +120,7 @@ Deno.serve(async (req) => {
     const prompt = `You are performing a high-fidelity virtual try-on task.
 
 INPUTS:
-- Image 1: the person (avatar). Use ONLY for their face, skin tone, body shape, pose, and hair. IGNORE everything the person is currently wearing — their existing clothes, jackets, scarves, dupattas, shawls, drapes, and worn accessories are NOT part of the output.
+- Image 1: CHARACTER REFERENCE — this exact person is the subject of the output. Use ONLY for their face, skin tone, body shape, pose, and hair. IGNORE everything the person is currently wearing — their existing clothes, jackets, scarves, dupattas, shawls, drapes, and worn accessories are NOT part of the output.
 ${garmentLines}
 
 OUTPUT: A single photorealistic image of the person, stripped of their original outfit and re-dressed in ONLY the clothing items listed above, worn together as a complete outfit.
@@ -129,26 +145,57 @@ PROHIBITIONS:
       inlineData: { mimeType: item.mimeType, data: item.base64 },
     }))
 
-    // Try Gemini models in order (best → fallback)
+    // Try Gemini models in order (best → fallback).
+    // The 2.5 preview and 2.0 models were shut down by Google in Jan/Feb 2026 and have
+    // been removed. Both the GA and -preview spellings of 3.1 Flash Image are listed
+    // because availability differs by key; the cascade falls through on a 404 and
+    // `model_used` in usage_logs records which one actually served the request.
     const models = [
-      'gemini-2.5-flash-preview-image-generation',
-      'gemini-2.5-flash-image',
-      'gemini-2.0-flash-preview-image-generation',
-      'gemini-2.0-flash-exp',
+      'gemini-3.1-flash-image',
+      'gemini-3.1-flash-image-preview',
+      'gemini-3-pro-image',
+      'gemini-2.5-flash-image', // legacy last resort
     ]
 
-    const geminiKey = Deno.env.get('GEMINI_API_KEY')!
+    // Trimmed because keys pasted into the dashboard routinely carry a trailing
+    // newline or space, which reads as an invalid key with no useful error.
+    const geminiKey = Deno.env.get('GEMINI_API_KEY')?.trim()
+    if (!geminiKey) return json({ error: 'Image generation is not configured.' }, 500)
     let resultBase64: string | null = null
     let resultMimeType = 'image/png'
     let modelUsed: string | null = null
+    const attemptErrors: string[] = []
 
     for (const model of models) {
       try {
+        // imageConfig only exists on the Gemini 3.x image models. Sending it to the
+        // 2.5 legacy model is rejected as an unknown field, which would take out the
+        // fallback as well as the primary.
+        const isGemini3 = model.startsWith('gemini-3')
+        const generationConfig: Record<string, unknown> = {
+          responseModalities: ['IMAGE', 'TEXT'],
+          // Identity preservation is hurt by sampling variance; 0.6 was letting the
+          // model invent a new face. May be ignored by the 3.x image models.
+          temperature: 0.25,
+          topP: 0.95,
+          topK: 40,
+        }
+        if (isGemini3) {
+          // Portrait output — full-body try-on otherwise renders into the default
+          // square, which crops heads and feet.
+          generationConfig.imageConfig = { aspectRatio: '3:4', imageSize: '2K' }
+        }
         const res = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`,
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
           {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            // Key goes in the header, not the query string: a value containing '&'
+            // would otherwise be parsed as extra query parameters and produce a
+            // baffling "Unknown name" error instead of "API key not valid".
+            headers: {
+              'Content-Type': 'application/json',
+              'x-goog-api-key': geminiKey,
+            },
             body: JSON.stringify({
               contents: [{
                 parts: [
@@ -157,12 +204,7 @@ PROHIBITIONS:
                   ...garmentParts,
                 ],
               }],
-              generationConfig: {
-                responseModalities: ['IMAGE', 'TEXT'],
-                temperature: 0.6,
-                topP: 0.95,
-                topK: 40,
-              },
+              generationConfig,
             }),
           }
         )
@@ -177,8 +219,14 @@ PROHIBITIONS:
             break
           }
         }
-        console.warn(`${model} failed:`, data.error?.message)
+        // 200 with no image part means the model refused or returned text only —
+        // record that distinctly from an API-level error.
+        const reason = data.error?.message
+          ?? (res.ok ? `HTTP ${res.status}: no image in response` : `HTTP ${res.status}`)
+        attemptErrors.push(`${model}: ${reason}`)
+        console.warn(`${model} failed:`, reason)
       } catch (e) {
+        attemptErrors.push(`${model}: ${(e as Error).message}`)
         console.warn(`${model} error:`, (e as Error).message)
       }
     }
@@ -190,7 +238,11 @@ PROHIBITIONS:
         model_used: null,
         success: false,
       })
-      return json({ error: 'Try-on generation failed. Please try again.' }, 500)
+      console.error('All models failed:', attemptErrors.join(' | '))
+      return json({
+        error: 'Try-on generation failed. Please try again.',
+        detail: attemptErrors.join(' | '),
+      }, 500)
     }
 
     // Upload result to tryon-results storage

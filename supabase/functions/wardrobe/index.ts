@@ -51,6 +51,23 @@ Deno.serve(async (req) => {
     const { data: { user }, error: authError } = await supabase.auth.getUser()
     if (authError || !user) return json({ error: 'Unauthorized' }, 401)
 
+    // Safety net: ensure this user has a profiles row before anything that
+    // depends on it. wardrobe_items.user_id references profiles(id), so a
+    // missing row (signup trigger absent or failed) rejects every insert.
+    // ignoreDuplicates → ON CONFLICT DO NOTHING, so existing profiles are never
+    // overwritten.
+    const { error: profileError } = await admin
+      .from('profiles')
+      .upsert(
+        {
+          id: user.id,
+          email: user.email ?? `${user.id}@placeholder.local`,
+          name: user.user_metadata?.full_name ?? null,
+        },
+        { onConflict: 'id', ignoreDuplicates: true }
+      )
+    if (profileError) console.warn('Profile ensure failed:', profileError.message)
+
     const url = new URL(req.url)
 
     // ── GET: list items ──────────────────────────────────────────────────────
