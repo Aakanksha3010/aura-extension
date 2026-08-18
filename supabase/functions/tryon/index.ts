@@ -234,6 +234,22 @@ Deno.serve(async (req) => {
     const { data: { user }, error: authError } = await supabase.auth.getUser()
     if (authError || !user) return json({ error: 'Unauthorized' }, 401)
 
+    // Safety net: ensure this user has a profiles row before the rate-limit
+    // lookup below. A missing row (signup trigger absent or failed) would
+    // otherwise 404 every try-on. ignoreDuplicates → ON CONFLICT DO NOTHING,
+    // so an existing profile's try_on_count is never reset.
+    const { error: profileError } = await admin
+      .from('profiles')
+      .upsert(
+        {
+          id: user.id,
+          email: user.email ?? `${user.id}@placeholder.local`,
+          name: user.user_metadata?.full_name ?? null,
+        },
+        { onConflict: 'id', ignoreDuplicates: true }
+      )
+    if (profileError) console.warn('Profile ensure failed:', profileError.message)
+
     // Rate limit check
     const { data: profile } = await supabase
       .from('profiles')
@@ -260,7 +276,7 @@ Deno.serve(async (req) => {
     if (falKey) {
       const f = await runFashnTryOn(falKey, `data:${avatarMimeType};base64,${avatarBase64}`, clothingItems)
       if (f.ok) result = f
-      else console.warn('FASHN failed, falling back to Gemini:', f.reason)
+      else console.warn('regenerate failed, falling back to Gemini:', f.reason)
     }
 
     // Engine 2: Gemini fallback
@@ -273,7 +289,11 @@ Deno.serve(async (req) => {
       await admin.from('usage_logs').insert({
         user_id: user.id, action: 'try_on', model_used: null, success: false,
       })
-      return json({ error: 'Try-on generation failed. Please try again.' }, 500)
+      console.error('All models failed:', attemptErrors.join(' | '))
+      return json({
+        error: 'Try-on generation failed. Please try again.',
+        detail: attemptErrors.join(' | '),
+      }, 500)
     }
 
     // Upload result
