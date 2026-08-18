@@ -254,7 +254,8 @@ Deno.serve(async (req) => {
       if (stale?.length) {
         await admin.storage
           .from('avatars')
-          .remove(stale.map(f => `${user.id}/candidates/${f.name}`))
+          .createSignedUrl(avatar.photo_url, 60 * 60 * 24 * 7)
+        signedPhotoUrl = data?.signedUrl
       }
 
       const batch = Date.now()
@@ -351,18 +352,9 @@ Deno.serve(async (req) => {
         user_id: user.id, action: 'avatar_save', success: true,
       })
 
-      return json({ avatar: { ...avatar, signedPhotoUrl: await signed(storagePath) } })
-    }
-
-    // ── POST legacy: single photo, saved as-is ───────────────────────────────
-    const parsed = LegacySchema.safeParse(body)
-    if (!parsed.success) {
-      return json({ error: 'Invalid request', details: parsed.error.issues }, 400)
-    }
-    const { name, photoBase64, photoMimeType, heightCm, weightKg } = parsed.data
-
-    const ext = photoMimeType.includes('png') ? 'png' : 'jpg'
-    const storagePath = `${user.id}/avatar.${ext}`
+      const { data: signedData } = await admin.storage
+        .from('avatars')
+        .createSignedUrl(storagePath, 60 * 60 * 24 * 7)
 
     const { error: uploadError } = await admin.storage
       .from('avatars')

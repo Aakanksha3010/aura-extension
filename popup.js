@@ -32,24 +32,38 @@ document.addEventListener('DOMContentLoaded', async () => {
     await loadState();
     showMainApp();
   } catch (err) {
-    // Never leave the boot spinner up forever — fall back to sign-in.
-    console.error('Startup failed:', err);
-    showAuthScreen();
+    // Never leave the popup blank: surface a retryable error instead of a
+    // header floating over empty white (the "blank popup" bug).
+    console.error('Init failed:', err);
+    showInitError(err?.message || 'Something went wrong loading Aura.');
   }
 });
 
-function hideBootScreen() {
-  document.getElementById('boot-screen').classList.add('hidden');
+function hideLoading() {
+  document.getElementById('loading-screen')?.classList.add('hidden');
+}
+
+function showInitError(message) {
+  hideLoading();
+  const screen = document.getElementById('loading-screen');
+  if (!screen) return;
+  screen.classList.remove('hidden');
+  screen.innerHTML = `
+    <div class="empty-icon">⚠️</div>
+    <p class="loading-text">${esc(message)}</p>
+    <button id="retry-init-btn" class="secondary-btn">↻ Retry</button>
+  `;
+  document.getElementById('retry-init-btn')?.addEventListener('click', () => location.reload());
 }
 
 function showAuthScreen() {
-  hideBootScreen();
+  hideLoading();
   document.getElementById('auth-screen').classList.remove('hidden');
   document.getElementById('main-app').classList.add('hidden');
 }
 
 function showMainApp() {
-  hideBootScreen();
+  hideLoading();
   document.getElementById('auth-screen').classList.add('hidden');
   document.getElementById('main-app').classList.remove('hidden');
   setupTabs();
@@ -112,6 +126,7 @@ async function loadState() {
     console.error('Failed to load from Supabase:', loadFailure);
     window._wardrobeLoadError = loadFailure.message;
   }
+  profile = await fetchProfile().catch(() => null);
 
   // Pick up any item saved via right-click context menu
   const { pendingContextItem } = await new Promise(resolve =>
@@ -198,14 +213,10 @@ async function scanPage() {
 function renderDetectedProducts(products, container) {
   container.innerHTML = '';
   products.forEach(product => {
-    const alreadySaved = wardrobe.some(
-      w => w.productUrl === product.productUrl || w.name === product.name
-    );
-
     const card = document.createElement('div');
     card.className = 'product-card';
     card.innerHTML = `
-      <img class="product-card-img" src="${product.imageUrl}" alt="${esc(product.name)}" loading="lazy"
+      <img class="product-card-img" src="${product.imageUrl || ''}" alt="${esc(product.name)}" loading="lazy"
            onerror="this.style.display='none'">
       <div class="product-card-info">
         <p class="product-card-brand">${esc(product.brand || '')}</p>
@@ -215,17 +226,57 @@ function renderDetectedProducts(products, container) {
           <span class="product-card-category">${esc(product.category)}</span>
         </div>
       </div>
-      <button class="save-btn ${alreadySaved ? 'saved' : ''}" ${alreadySaved ? 'disabled' : ''}>
-        ${alreadySaved ? 'In Wardrobe' : 'Save to Wardrobe'}
-      </button>
+      <button class="save-btn"></button>
     `;
 
     const saveBtn = card.querySelector('.save-btn');
-    if (!alreadySaved) {
-      saveBtn.addEventListener('click', () => saveProduct(product, saveBtn));
-    }
+    _renderSaveBtnState(product, saveBtn);
     container.appendChild(card);
   });
+}
+
+// Find the wardrobe entry matching a detected product (if it's been saved).
+function _findSavedItem(product) {
+  return wardrobe.find(
+    w => w.productUrl === product.productUrl || w.name === product.name
+  );
+}
+
+// Set a detect-card's action button to reflect current saved state. When saved,
+// the button becomes an "undo" that removes the item from the wardrobe — so an
+// unwanted detection (e.g. an imageless half of a "set") can be dropped without
+// leaving the Detect view. Uses onclick so re-rendering re-wires cleanly.
+function _renderSaveBtnState(product, btn) {
+  const savedItem = _findSavedItem(product);
+  btn.disabled = false;
+  if (savedItem) {
+    btn.classList.add('saved');
+    btn.textContent = '✓ In Wardrobe  ✕';
+    btn.title = 'Remove from wardrobe';
+    btn.onclick = () => removeProduct(product, btn, savedItem.id);
+  } else {
+    btn.classList.remove('saved');
+    btn.textContent = '＋ Save to Wardrobe';
+    btn.title = '';
+    btn.onclick = () => saveProduct(product, btn);
+  }
+}
+
+// Remove a previously-saved detected item from the wardrobe (undo a save).
+async function removeProduct(product, btn, itemId) {
+  const prev = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '⏳ Removing...';
+  try {
+    await deleteWardrobeItem(itemId);
+    wardrobe = wardrobe.filter(w => w.id !== itemId);
+    selectedItems.delete(itemId);
+    _renderSaveBtnState(product, btn); // flips back to "Save"
+  } catch (err) {
+    btn.disabled = false;
+    btn.textContent = prev;
+    console.error('Remove failed:', err.message);
+  }
 }
 
 async function saveProduct(product, btn) {
@@ -233,9 +284,7 @@ async function saveProduct(product, btn) {
     w => w.productUrl === product.productUrl || w.name === product.name
   );
   if (duplicate) {
-    btn.textContent = 'In Wardrobe';
-    btn.classList.add('saved');
-    btn.disabled = true;
+    _renderSaveBtnState(product, btn); // shows saved state with remove option
     return;
   }
 
@@ -266,14 +315,11 @@ async function saveProduct(product, btn) {
       source: product.source,
     });
     wardrobe.push(saved);
-    btn.textContent = 'In Wardrobe';
-    btn.classList.add('saved');
-    btn.disabled = true;
-    // Remove any previous error
+    // Remove any previous error, then flip the button to the saved/remove state
     btn.parentElement?.querySelector('.save-error')?.remove();
+    _renderSaveBtnState(product, btn);
   } catch (err) {
-    btn.textContent = '＋ Save to Wardrobe';
-    btn.disabled = false;
+    _renderSaveBtnState(product, btn); // back to "Save" so a retry works
     // Show error directly under the button so we can see what's wrong
     let errEl = btn.parentElement?.querySelector('.save-error');
     if (!errEl) {
@@ -395,16 +441,86 @@ function setupAvatarTab() {
   const uploadLabel = document.getElementById('avatar-upload-label');
   const saveBtn = document.getElementById('save-avatar-btn');
 
+  // ── Upload validation ──────────────────────────────────────────────────────
+  // A good avatar photo is what makes the try-on work, so reject anything that
+  // clearly won't (wrong format, too big/tiny, low-res, banner-shaped) with a
+  // specific message telling the user how to fix it, instead of silently
+  // accepting a bad image and failing later at generation time.
+  const ALLOWED_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+  const MAX_BYTES = 12 * 1024 * 1024; // 12 MB — server/base64 upload ceiling
+  const MIN_BYTES = 5 * 1024;         // 5 KB — catch empty/corrupt files
+  const MIN_DIM = 256;                // px per side — below this, try-on is poor
+  const MAX_ASPECT = 2.6;             // wider/taller than this isn't a person photo
+
+  const errEl = document.getElementById('avatar-upload-required');
+  const showAvatarError = msg => {
+    errEl.textContent = '⚠️ ' + msg;
+    errEl.classList.remove('hidden');
+  };
+  const clearAvatarError = () => errEl.classList.add('hidden');
+  const resetUpload = () => {
+    uploadInput.value = '';
+    uploadPreview.removeAttribute('src');
+    uploadPreview.classList.add('hidden');
+    uploadLabel.classList.remove('hidden');
+  };
+
   uploadArea.addEventListener('click', () => uploadInput.click());
 
   uploadInput.addEventListener('change', e => {
     const file = e.target.files[0];
     if (!file) return;
+    clearAvatarError();
+
+    // 1. Format — only real photo formats the model accepts.
+    const type = (file.type || '').toLowerCase();
+    const name = (file.name || '').toLowerCase();
+    if (!ALLOWED_TYPES.includes(type)) {
+      if (type.includes('heic') || type.includes('heif') || /\.(heic|heif)$/.test(name)) {
+        showAvatarError('HEIC photos aren’t supported. On iPhone, save/convert the photo to JPG or PNG first.');
+      } else {
+        showAvatarError('Unsupported file. Please upload a JPG, PNG, or WebP image.');
+      }
+      resetUpload();
+      return;
+    }
+
+    // 2. Size bounds.
+    if (file.size > MAX_BYTES) {
+      showAvatarError(`Image is too large (${(file.size / 1048576).toFixed(1)} MB). Please use one under 12 MB.`);
+      resetUpload();
+      return;
+    }
+    if (file.size < MIN_BYTES) {
+      showAvatarError('That image looks empty or corrupted. Please choose another photo.');
+      resetUpload();
+      return;
+    }
+
+    // 3. Decode to verify it's a real image and check dimensions/shape.
     const reader = new FileReader();
+    reader.onerror = () => { showAvatarError('Could not read that file. Please choose another photo.'); resetUpload(); };
     reader.onload = () => {
-      uploadPreview.src = reader.result;
-      uploadPreview.classList.remove('hidden');
-      uploadLabel.classList.add('hidden');
+      const img = new Image();
+      img.onload = () => {
+        const w = img.naturalWidth, h = img.naturalHeight;
+        if (w < MIN_DIM || h < MIN_DIM) {
+          showAvatarError(`Image is too small (${w}×${h}px). Please use at least ${MIN_DIM}×${MIN_DIM}px — a clear, full-body photo works best.`);
+          resetUpload();
+          return;
+        }
+        if (Math.max(w, h) / Math.min(w, h) > MAX_ASPECT) {
+          showAvatarError('This looks like a banner or cropped strip, not a portrait. Please upload a normal photo of yourself.');
+          resetUpload();
+          return;
+        }
+        // Passed all checks — show the preview.
+        uploadPreview.src = reader.result;
+        uploadPreview.classList.remove('hidden');
+        uploadLabel.classList.add('hidden');
+      };
+      img.onerror = () => { showAvatarError('That image couldn’t be decoded. Please upload a valid JPG, PNG, or WebP.'); resetUpload(); };
+      img.src = reader.result;
     };
     reader.readAsDataURL(file);
   });
@@ -412,10 +528,10 @@ function setupAvatarTab() {
   saveBtn.addEventListener('click', async () => {
     const src = uploadPreview.src;
     if (!src || src === window.location.href) {
-      document.getElementById('avatar-upload-required').classList.remove('hidden');
+      showAvatarError('Please upload a photo to generate your avatar.');
       return;
     }
-    document.getElementById('avatar-upload-required').classList.add('hidden');
+    clearAvatarError();
 
     const name = document.getElementById('avatar-name').value.trim() || 'Me';
     saveBtn.textContent = '⏳ Saving...';
@@ -707,8 +823,8 @@ async function handleTryOn() {
         ${warningHtml}
         <img id="tryon-result-img" alt="Virtual Try-On">
         <div class="tryon-result-actions">
-          <button class="secondary-btn" id="retry-tryon-btn">Try Again</button>
-          <button class="secondary-btn" id="save-look-btn">Save This Look</button>
+          <button class="secondary-btn" id="retry-tryon-btn">↺ Try Again</button>
+          <button class="secondary-btn" id="save-look-btn">💾 Save This Look</button>
         </div>
       `;
       document.getElementById('tryon-result-img').src = imageUrl;
@@ -740,7 +856,7 @@ async function handleTryOn() {
     if (isLimitHit) {
       result.innerHTML = `
         <div class="empty-state">
-          <div class="empty-icon">${ICON.sparkle}</div>
+          <div class="empty-icon">✨</div>
           <h3>Free limit reached</h3>
           <p>You've used all your free try-ons. <a href="mailto:aakankshagyan3010@gmail.com?subject=Aura%20Pro%20Access" style="color:#000;font-weight:600">Join the Pro waitlist →</a></p>
         </div>`;
@@ -749,10 +865,10 @@ async function handleTryOn() {
     } else {
       result.innerHTML = `
         <div class="empty-state">
-          <div class="empty-icon">${ICON.alert}</div>
+          <div class="empty-icon">⚠️</div>
           <h3>Try-on failed</h3>
           <p>${esc(err.message)}</p>
-          <button class="secondary-btn" id="retry-tryon-btn">Try Again</button>
+          <button class="secondary-btn" id="retry-tryon-btn" style="margin-top:8px">↺ Try Again</button>
         </div>`;
       document.getElementById('retry-tryon-btn')?.addEventListener('click', handleTryOn);
     }

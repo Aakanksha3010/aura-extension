@@ -22,10 +22,10 @@
       </button>
     </header>
 
-    <!-- Boot state — visible immediately so the popup is never a blank white box
-         while getUser() and loadState() are in flight. -->
-    <div id="boot-screen">
-      <div class="loader"><div class="spinner"></div><span>Loading your wardrobe</span></div>
+    <!-- Loading Screen (shown on first paint while we check auth + load data) -->
+    <div id="loading-screen" class="loader">
+      <div class="spinner"></div>
+      <p class="loading-text">Loading your wardrobe…</p>
     </div>
 
     <!-- Auth Screen (shown when not signed in) -->
@@ -97,7 +97,7 @@
           <input type="text" id="avatar-name" placeholder="Your name" required>
         </div>
         <div class="file-upload" id="avatar-upload-area">
-          <input type="file" id="avatar-upload-input" accept="image/*" hidden>
+          <input type="file" id="avatar-upload-input" accept="image/jpeg,image/png,image/webp" hidden>
           <div id="avatar-upload-label" class="upload-label">
             <span class="upload-icon">
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -145,7 +145,7 @@
       </div>
 
       <p id="tryon-counter" class="tryon-counter"></p>
-      <button id="generate-outfit-btn" class="primary-btn">Generate Try-On</button>
+      <button id="generate-outfit-btn" class="primary-btn">✨ Generate Try-On</button>
 
       <div id="tryon-result"></div>
     </section>

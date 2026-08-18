@@ -8,6 +8,7 @@ BILLING-AND-STATUS.md
 *.log
 node_modules/
 
-# Chrome extension signing key — never commit
+# Extension signing key — MUST NOT be committed (leaking it lets others publish
+# updates under this extension's identity).
 *.pem
 key.pem
