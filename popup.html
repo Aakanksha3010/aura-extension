@@ -96,8 +96,14 @@
         <div class="form-row">
           <input type="text" id="avatar-name" placeholder="Your name" required>
         </div>
+        <div class="form-row two-col">
+          <input type="number" id="avatar-height" placeholder="Height (cm)" min="50" max="260" step="1" inputmode="numeric">
+          <input type="number" id="avatar-weight" placeholder="Weight (kg)" min="20" max="400" step="1" inputmode="numeric">
+        </div>
+        <p class="form-hint">Both optional. They are saved for size recommendations later, and — only when you give both — the generator gets a one-word build hint. Numbers cannot steer an image model precisely: your photos are what decide the body shape.</p>
+
         <div class="file-upload" id="avatar-upload-area">
-          <input type="file" id="avatar-upload-input" accept="image/*" hidden>
+          <input type="file" id="avatar-upload-input" accept="image/jpeg,image/png,image/webp" multiple hidden>
           <div id="avatar-upload-label" class="upload-label">
             <span class="upload-icon">
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -105,13 +111,17 @@
                 <circle cx="12" cy="13.5" r="3.5"></circle>
               </svg>
             </span>
-            <span>Upload your photo</span>
+            <span id="avatar-upload-text">Upload 2–4 photos</span>
+            <em>JPEG, PNG or WebP</em>
           </div>
-          <img id="avatar-upload-preview" class="photo-preview hidden" alt="Your photo">
         </div>
+
+        <div id="avatar-photo-strip" class="photo-strip hidden"></div>
+
         <div class="photo-tips">
           <p class="photo-tips-title">For best try-on results:</p>
           <ul class="photo-tips-list">
+            <li>2–4 photos of you — different angles help most</li>
             <li>Full body visible — head to toe</li>
             <li>Facing forward, in good lighting</li>
             <li>Just you — no one else in frame</li>
@@ -119,9 +129,30 @@
           </ul>
         </div>
 
-        <p id="avatar-upload-required" class="photo-required-msg hidden">Please upload a photo to generate your avatar.</p>
+        <p id="avatar-form-error" class="photo-required-msg hidden"></p>
 
-        <button type="button" class="primary-btn" id="save-avatar-btn">Save Avatar</button>
+        <button type="button" class="primary-btn" id="save-avatar-btn">Generate Avatar</button>
+      </div>
+
+      <!-- Three candidates, each walking the model cascade, so generation takes
+           tens of seconds. This pane keeps the popup visibly alive while it runs. -->
+      <div id="avatar-progress" class="hidden">
+        <div class="loader">
+          <div class="spinner"></div>
+          <span id="avatar-progress-text">Generating 3 avatars</span>
+        </div>
+        <p class="avatar-tip">This usually takes 30–60 seconds. Keep this popup open — closing it cancels the request.</p>
+      </div>
+
+      <div id="avatar-candidates" class="hidden">
+        <h3 class="form-title">Pick Your Avatar</h3>
+        <p id="avatar-candidate-note" class="avatar-tip">Only the one you pick is kept — the rest are deleted.</p>
+        <div id="avatar-candidate-grid" class="candidate-grid"></div>
+        <p id="avatar-candidate-error" class="photo-required-msg hidden"></p>
+        <div class="avatar-actions">
+          <button type="button" class="secondary-btn" id="avatar-restart-btn">Start Over</button>
+          <button type="button" class="primary-btn" id="avatar-commit-btn" disabled>Use This One</button>
+        </div>
       </div>
     </section>
 

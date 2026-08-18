@@ -746,12 +746,22 @@ header {
 
 .form-title { margin-bottom: 0; }
 
+/* The form wrapper is a plain div inside the flex tab, so it needs its own stack */
+#avatar-form,
+#avatar-progress,
+#avatar-candidates {
+  display: flex;
+  flex-direction: column;
+  gap: var(--stack-md);
+}
+
 .form-row { display: flex; gap: var(--stack-sm); }
 .form-row.two-col > * { flex: 1; }
 
 .form-row input,
 .form-row select,
-#avatar-form input[type="text"] {
+#avatar-form input[type="text"],
+#avatar-form input[type="number"] {
   width: 100%;
   padding: 12px;
   border: 1px solid var(--border-muted);
@@ -798,14 +808,110 @@ header {
 .upload-icon { display: flex; line-height: 0; }
 .upload-label em { color: var(--secondary); font-style: normal; }
 
-.photo-preview {
-  width: 100%;
+.form-hint {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--secondary);
+}
+
+/* Selected photos — 4 up, so a full set fits one row of the 350px column */
+.photo-strip {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--stack-sm);
+}
+
+.photo-thumb {
+  position: relative;
   aspect-ratio: 3 / 4;
+  border: 1px solid var(--border-muted);
+  background: var(--surface-container-low);
+  overflow: hidden;
+}
+
+.photo-thumb img {
+  width: 100%;
+  height: 100%;
   object-fit: cover;
-  border-radius: 0;
-  margin-top: var(--stack-sm);
   display: block;
 }
+
+.photo-thumb-remove {
+  position: absolute;
+  top: var(--unit);
+  right: var(--unit);
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  background: var(--surface-container-lowest);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-sm);
+  color: var(--primary);
+  font-family: inherit;
+  font-size: 10px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.photo-thumb-remove:hover {
+  background: var(--primary);
+  color: var(--on-primary);
+  border-color: var(--primary);
+}
+
+/* Candidate picker — 3 up at ~111px per card inside the 350px content column */
+.candidate-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--stack-sm);
+}
+
+.candidate-card {
+  position: relative;
+  aspect-ratio: 3 / 4;
+  border: 1px solid var(--border-muted);
+  background: var(--surface-container-low);
+  overflow: hidden;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+
+.candidate-card:hover { border-color: var(--primary); }
+.candidate-card.selected { border-color: var(--primary); border-width: 2px; }
+
+.candidate-card img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* A candidate whose signed URL fails to load — framed, not blank */
+.candidate-card.candidate-broken { border-style: dashed; }
+.candidate-card.candidate-broken img { display: none; }
+
+.candidate-check {
+  position: absolute;
+  top: var(--unit);
+  right: var(--unit);
+  width: 18px;
+  height: 18px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: var(--primary);
+  color: var(--on-primary);
+  font-size: 11px;
+  line-height: 1;
+}
+
+.candidate-card.selected .candidate-check { display: flex; }
+
+.avatar-actions .primary-btn { flex: 1; }
 
 /* Informational panels — hairline framing, no fills that fight the imagery */
 .avatar-tip,
