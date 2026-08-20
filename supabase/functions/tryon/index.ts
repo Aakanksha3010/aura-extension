@@ -3,16 +3,17 @@
 // result in tryon-results storage, and returns a signed URL.
 //
 // Two engines, in priority order:
-//   1. FASHN v1.6 via fal.ai (if FAL_KEY is set) — a purpose-built virtual
-//      try-on model that repaints ONLY the garment region, so the person's
-//      face/identity is preserved by construction. Multi-item outfits are
-//      chained garment-by-garment.
-//   2. Gemini image models (fallback) — general image gen; identity is prompt-
-//      guarded but can drift. Used when FAL_KEY is absent or FASHN fails.
+//   1. Gemini image models (primary) — edits the avatar photo directly and can
+//      apply every garment category in one pass, including shoes and
+//      accessories. Identity is prompt-guarded, so it can drift.
+//   2. FASHN v1.6 via fal.ai (fallback, only if FAL_KEY is set) — a purpose-built
+//      VTON model that repaints ONLY the garment region, so identity is
+//      preserved by construction. It cannot do shoes or accessories, and it
+//      chains one request per garment, so it is slower and partial.
 //
 // Required env vars (Supabase Dashboard → Edge Functions → Secrets):
-//   GEMINI_API_KEY            (fallback engine)
-//   FAL_KEY                   (primary engine — add this to enable identity-lock)
+//   GEMINI_API_KEY            (primary engine — required)
+//   FAL_KEY                   (fallback engine — optional)
 //   SUPABASE_URL              (auto-set)
 //   SUPABASE_ANON_KEY         (auto-set)
 //   SUPABASE_SERVICE_ROLE_KEY (auto-set)
@@ -42,7 +43,7 @@ const TryOnRequestSchema = z.object({
 
 type ClothingItem = z.infer<typeof ClothingItemSchema>
 
-// ── FASHN (fal.ai) primary engine ─────────────────────────────────────────────
+// ── FASHN (fal.ai) fallback engine ────────────────────────────────────────────
 
 // Map our categories → FASHN's. Garment-VTON only handles worn clothing, so
 // shoes/accessories have no mapping and are skipped in the VTON pass.
@@ -108,7 +109,7 @@ async function runFashnTryOn(
   return { ok: true, bytes, mimeType: 'image/png', model: 'fashn/tryon/v1.6', skipped }
 }
 
-// ── Gemini fallback engine ────────────────────────────────────────────────────
+// ── Gemini primary engine ─────────────────────────────────────────────────────
 
 const bodyRegion = (cat: string): string => {
   switch (cat) {
@@ -158,20 +159,48 @@ OUTPUT: one photorealistic image — the SAME person and pose as Image 1, full b
     inlineData: { mimeType: item.mimeType, data: item.base64 },
   }))
 
+  // The 2.5-preview and 2.0 models were shut down by Google in Jan/Feb 2026.
+  // Both the GA and -preview spellings of 3.1 Flash Image are listed because
+  // availability differs by key; the cascade falls through on a 404 and
+  // `model_used` in usage_logs records which one actually served the request.
   const models = [
-    'gemini-2.5-flash-image',
-    'gemini-2.5-flash-preview-image-generation',
-    'gemini-2.0-flash-preview-image-generation',
-    'gemini-2.0-flash-exp',
+    'gemini-3.1-flash-image',
+    'gemini-3.1-flash-image-preview',
+    'gemini-3-pro-image',
+    'gemini-2.5-flash-image', // legacy last resort
   ]
+
+  const attempts: string[] = []
 
   for (const model of models) {
     try {
+      // imageConfig only exists on the Gemini 3.x image models. Sending it to the
+      // 2.5 legacy model is rejected as an unknown field, which would take out the
+      // last-resort fallback as well as the primary.
+      const generationConfig: Record<string, unknown> = {
+        responseModalities: ['IMAGE', 'TEXT'],
+        // Identity preservation is hurt by sampling variance. May be ignored
+        // outright by the 3.x image models, which document thinking_level instead.
+        temperature: 0.25,
+        topP: 0.95,
+        topK: 40,
+      }
+      if (model.startsWith('gemini-3')) {
+        // Portrait output — full-body try-on otherwise renders into the default
+        // square, which crops heads and feet.
+        generationConfig.imageConfig = { aspectRatio: '3:4', imageSize: '2K' }
+      }
       const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
         {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          // Key goes in the header, not the query string: a value containing '&'
+          // would otherwise be parsed as extra query parameters and produce a
+          // baffling "Unknown name" error instead of "API key not valid".
+          headers: {
+            'Content-Type': 'application/json',
+            'x-goog-api-key': geminiKey,
+          },
           body: JSON.stringify({
             contents: [{
               parts: [
@@ -180,12 +209,7 @@ OUTPUT: one photorealistic image — the SAME person and pose as Image 1, full b
                 ...garmentParts,
               ],
             }],
-            generationConfig: {
-              responseModalities: ['IMAGE', 'TEXT'],
-              temperature: 0.25,
-              topP: 0.95,
-              topK: 40,
-            },
+            generationConfig,
           }),
         }
       )
@@ -198,12 +222,18 @@ OUTPUT: one photorealistic image — the SAME person and pose as Image 1, full b
           return { ok: true, bytes, mimeType: imgPart.inlineData.mimeType ?? 'image/png', model }
         }
       }
-      console.warn(`${model} failed:`, data.error?.message)
+      // 200 with no image part means the model refused or returned text only —
+      // record that distinctly from an API-level error.
+      const why = data.error?.message
+        ?? (res.ok ? `HTTP ${res.status}: no image in response` : `HTTP ${res.status}`)
+      attempts.push(`${model}: ${why}`)
+      console.warn(`${model} failed:`, why)
     } catch (e) {
+      attempts.push(`${model}: ${(e as Error).message}`)
       console.warn(`${model} error:`, (e as Error).message)
     }
   }
-  return { ok: false, reason: 'all Gemini models failed' }
+  return { ok: false, reason: attempts.join(' | ') || 'all Gemini models failed' }
 }
 
 // ── Handler ───────────────────────────────────────────────────────────────────
@@ -270,26 +300,43 @@ Deno.serve(async (req) => {
     }
     const { avatarBase64, avatarMimeType, clothingItems } = parsed.data
 
-    // Engine 1: FASHN (identity-locked) when configured; else fall through.
+    // Every engine's failure reason is collected here so a total failure reports
+    // what actually went wrong. Previously this referenced an `attemptErrors`
+    // that no longer existed in this scope, so the failure path itself threw.
+    const attemptErrors: string[] = []
     let result: EngineResult | null = null
-    const falKey = Deno.env.get('FAL_KEY')
-    if (falKey) {
-      const f = await runFashnTryOn(falKey, `data:${avatarMimeType};base64,${avatarBase64}`, clothingItems)
-      if (f.ok) result = f
-      else console.warn('regenerate failed, falling back to Gemini:', f.reason)
+
+    // Engine 1: Gemini. Trimmed because keys pasted into the dashboard routinely
+    // carry a trailing newline, which reads as an invalid key with no useful error.
+    const geminiKey = Deno.env.get('GEMINI_API_KEY')?.trim()
+    if (!geminiKey) {
+      attemptErrors.push('gemini: GEMINI_API_KEY is not set')
+    } else {
+      const g = await runGeminiTryOn(geminiKey, avatarBase64, avatarMimeType, clothingItems)
+      if (g.ok) result = g
+      else attemptErrors.push(g.reason ?? 'gemini failed')
     }
 
-    // Engine 2: Gemini fallback
+    // Engine 2: FASHN, only when configured. It cannot apply shoes or accessories,
+    // so a success here may be a partial outfit — `skipped` carries how many items
+    // were dropped.
     if (!result) {
-      const g = await runGeminiTryOn(Deno.env.get('GEMINI_API_KEY')!, avatarBase64, avatarMimeType, clothingItems)
-      if (g.ok) result = g
+      const falKey = Deno.env.get('FAL_KEY')
+      if (!falKey) {
+        attemptErrors.push('fashn: FAL_KEY is not set')
+      } else {
+        console.warn('Gemini failed, falling back to FASHN:', attemptErrors.join(' | '))
+        const f = await runFashnTryOn(falKey, `data:${avatarMimeType};base64,${avatarBase64}`, clothingItems)
+        if (f.ok) result = f
+        else attemptErrors.push(f.reason ?? 'fashn failed')
+      }
     }
 
     if (!result?.ok || !result.bytes) {
       await admin.from('usage_logs').insert({
         user_id: user.id, action: 'try_on', model_used: null, success: false,
       })
-      console.error('All models failed:', attemptErrors.join(' | '))
+      console.error('All engines failed:', attemptErrors.join(' | '))
       return json({
         error: 'Try-on generation failed. Please try again.',
         detail: attemptErrors.join(' | '),
