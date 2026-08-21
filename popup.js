@@ -394,6 +394,12 @@ function toggleSelection(id) {
 const MIN_PHOTOS = 2;                 // multi-photo is the point: one photo is the old flow
 const MAX_PHOTOS = 4;                 // server ceiling (model character-reference limit)
 const MAX_FILE_BYTES = 12 * 1024 * 1024;
+// Ported from the single-photo validator: a bad photo fails at generation time
+// otherwise, minutes later and with a useless error.
+const MIN_FILE_BYTES = 5 * 1024;      // empty or truncated file
+const MIN_PHOTO_DIM = 256;            // px per side — below this the try-on is poor
+const MAX_PHOTO_ASPECT = 2.6;         // wider/taller than this is a banner, not a person
+const ALLOWED_PHOTO_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
 const MAX_PHOTO_B64 = 1500000;        // ~1.1 MB of JPEG per photo
 const MAX_TOTAL_B64 = 4500000;        // keeps the JSON body comfortably small
 // Progressively cheaper encodings, tried in order until one fits MAX_PHOTO_B64.
@@ -469,7 +475,17 @@ async function processPhotoFile(file) {
       `${(file.size / 1048576).toFixed(1)} MB is too large (${MAX_FILE_BYTES / 1048576} MB max).`
     );
   }
-  if (!file.type.startsWith('image/')) throw new Error('not an image file.');
+  if (file.size < MIN_FILE_BYTES) throw new Error('looks empty or corrupted.');
+
+  // Checked by type and extension before decoding, so HEIC gets its own message
+  // rather than surfacing as a generic decode failure.
+  const type = (file.type || '').toLowerCase();
+  if (!ALLOWED_PHOTO_TYPES.includes(type)) {
+    if (type.includes('heic') || type.includes('heif') || /\.(heic|heif)$/i.test(file.name || '')) {
+      throw new Error("is HEIC — Chrome can't open it. On iPhone, save it as JPG or PNG first.");
+    }
+    throw new Error('is not a JPG, PNG, or WebP image.');
+  }
 
   let bitmap;
   try {
@@ -477,6 +493,17 @@ async function processPhotoFile(file) {
   } catch {
     // Chrome cannot decode HEIC/HEIF, which is the iPhone default format.
     throw new Error("could not be read — Chrome can't open HEIC photos. Export it as JPEG and retry.");
+  }
+
+  if (bitmap.width < MIN_PHOTO_DIM || bitmap.height < MIN_PHOTO_DIM) {
+    bitmap.close?.();
+    throw new Error(
+      `is too small (${bitmap.width}x${bitmap.height}px) — use at least ${MIN_PHOTO_DIM}x${MIN_PHOTO_DIM}px.`
+    );
+  }
+  if (Math.max(bitmap.width, bitmap.height) / Math.min(bitmap.width, bitmap.height) > MAX_PHOTO_ASPECT) {
+    bitmap.close?.();
+    throw new Error('looks like a banner or cropped strip, not a photo of a person.');
   }
 
   try {

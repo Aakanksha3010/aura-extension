@@ -1250,6 +1250,23 @@ header {
 
 .look-delete-btn:hover { color: var(--error); }
 
+.tryon-counter {
+  font-size: 11px;
+  color: #888;
+  text-align: center;
+  margin: 0 0 6px;
+}
+.tryon-counter--low { color: #c17f24; }
+.tryon-counter--warn { color: #b00; }
+
+.tryon-result-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+  width: 100%;
+}
+.tryon-result-actions .secondary-btn { flex: 1; }
+
 /* ===== SETTINGS MODAL ===== */
 .modal {
   position: fixed;
