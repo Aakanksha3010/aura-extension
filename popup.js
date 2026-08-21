@@ -32,38 +32,24 @@ document.addEventListener('DOMContentLoaded', async () => {
     await loadState();
     showMainApp();
   } catch (err) {
-    // Never leave the popup blank: surface a retryable error instead of a
-    // header floating over empty white (the "blank popup" bug).
-    console.error('Init failed:', err);
-    showInitError(err?.message || 'Something went wrong loading Aura.');
+    // Never leave the boot spinner up forever — fall back to sign-in.
+    console.error('Startup failed:', err);
+    showAuthScreen();
   }
 });
 
-function hideLoading() {
-  document.getElementById('loading-screen')?.classList.add('hidden');
-}
-
-function showInitError(message) {
-  hideLoading();
-  const screen = document.getElementById('loading-screen');
-  if (!screen) return;
-  screen.classList.remove('hidden');
-  screen.innerHTML = `
-    <div class="empty-icon">⚠️</div>
-    <p class="loading-text">${esc(message)}</p>
-    <button id="retry-init-btn" class="secondary-btn">↻ Retry</button>
-  `;
-  document.getElementById('retry-init-btn')?.addEventListener('click', () => location.reload());
+function hideBootScreen() {
+  document.getElementById('boot-screen').classList.add('hidden');
 }
 
 function showAuthScreen() {
-  hideLoading();
+  hideBootScreen();
   document.getElementById('auth-screen').classList.remove('hidden');
   document.getElementById('main-app').classList.add('hidden');
 }
 
 function showMainApp() {
-  hideLoading();
+  hideBootScreen();
   document.getElementById('auth-screen').classList.add('hidden');
   document.getElementById('main-app').classList.remove('hidden');
   setupTabs();
@@ -126,7 +112,6 @@ async function loadState() {
     console.error('Failed to load from Supabase:', loadFailure);
     window._wardrobeLoadError = loadFailure.message;
   }
-  profile = await fetchProfile().catch(() => null);
 
   // Pick up any item saved via right-click context menu
   const { pendingContextItem } = await new Promise(resolve =>
@@ -213,10 +198,14 @@ async function scanPage() {
 function renderDetectedProducts(products, container) {
   container.innerHTML = '';
   products.forEach(product => {
+    const alreadySaved = wardrobe.some(
+      w => w.productUrl === product.productUrl || w.name === product.name
+    );
+
     const card = document.createElement('div');
     card.className = 'product-card';
     card.innerHTML = `
-      <img class="product-card-img" src="${product.imageUrl || ''}" alt="${esc(product.name)}" loading="lazy"
+      <img class="product-card-img" src="${product.imageUrl}" alt="${esc(product.name)}" loading="lazy"
            onerror="this.style.display='none'">
       <div class="product-card-info">
         <p class="product-card-brand">${esc(product.brand || '')}</p>
@@ -226,57 +215,17 @@ function renderDetectedProducts(products, container) {
           <span class="product-card-category">${esc(product.category)}</span>
         </div>
       </div>
-      <button class="save-btn"></button>
+      <button class="save-btn ${alreadySaved ? 'saved' : ''}" ${alreadySaved ? 'disabled' : ''}>
+        ${alreadySaved ? 'In Wardrobe' : 'Save to Wardrobe'}
+      </button>
     `;
 
     const saveBtn = card.querySelector('.save-btn');
-    _renderSaveBtnState(product, saveBtn);
+    if (!alreadySaved) {
+      saveBtn.addEventListener('click', () => saveProduct(product, saveBtn));
+    }
     container.appendChild(card);
   });
-}
-
-// Find the wardrobe entry matching a detected product (if it's been saved).
-function _findSavedItem(product) {
-  return wardrobe.find(
-    w => w.productUrl === product.productUrl || w.name === product.name
-  );
-}
-
-// Set a detect-card's action button to reflect current saved state. When saved,
-// the button becomes an "undo" that removes the item from the wardrobe — so an
-// unwanted detection (e.g. an imageless half of a "set") can be dropped without
-// leaving the Detect view. Uses onclick so re-rendering re-wires cleanly.
-function _renderSaveBtnState(product, btn) {
-  const savedItem = _findSavedItem(product);
-  btn.disabled = false;
-  if (savedItem) {
-    btn.classList.add('saved');
-    btn.textContent = '✓ In Wardrobe  ✕';
-    btn.title = 'Remove from wardrobe';
-    btn.onclick = () => removeProduct(product, btn, savedItem.id);
-  } else {
-    btn.classList.remove('saved');
-    btn.textContent = '＋ Save to Wardrobe';
-    btn.title = '';
-    btn.onclick = () => saveProduct(product, btn);
-  }
-}
-
-// Remove a previously-saved detected item from the wardrobe (undo a save).
-async function removeProduct(product, btn, itemId) {
-  const prev = btn.textContent;
-  btn.disabled = true;
-  btn.textContent = '⏳ Removing...';
-  try {
-    await deleteWardrobeItem(itemId);
-    wardrobe = wardrobe.filter(w => w.id !== itemId);
-    selectedItems.delete(itemId);
-    _renderSaveBtnState(product, btn); // flips back to "Save"
-  } catch (err) {
-    btn.disabled = false;
-    btn.textContent = prev;
-    console.error('Remove failed:', err.message);
-  }
 }
 
 async function saveProduct(product, btn) {
@@ -284,7 +233,9 @@ async function saveProduct(product, btn) {
     w => w.productUrl === product.productUrl || w.name === product.name
   );
   if (duplicate) {
-    _renderSaveBtnState(product, btn); // shows saved state with remove option
+    btn.textContent = 'In Wardrobe';
+    btn.classList.add('saved');
+    btn.disabled = true;
     return;
   }
 
@@ -315,11 +266,14 @@ async function saveProduct(product, btn) {
       source: product.source,
     });
     wardrobe.push(saved);
-    // Remove any previous error, then flip the button to the saved/remove state
+    btn.textContent = 'In Wardrobe';
+    btn.classList.add('saved');
+    btn.disabled = true;
+    // Remove any previous error
     btn.parentElement?.querySelector('.save-error')?.remove();
-    _renderSaveBtnState(product, btn);
   } catch (err) {
-    _renderSaveBtnState(product, btn); // back to "Save" so a retry works
+    btn.textContent = '＋ Save to Wardrobe';
+    btn.disabled = false;
     // Show error directly under the button so we can see what's wrong
     let errEl = btn.parentElement?.querySelector('.save-error');
     if (!errEl) {
@@ -434,146 +388,417 @@ function toggleSelection(id) {
 }
 
 // ===== AVATAR TAB =====
+// Enrollment is a three-pane flow — form → progress → candidate picker — driven by
+// `avatarPane` so switching tabs mid-flow can never strand the user on a dead screen.
+
+const MIN_PHOTOS = 2;                 // multi-photo is the point: one photo is the old flow
+const MAX_PHOTOS = 4;                 // server ceiling (model character-reference limit)
+const MAX_FILE_BYTES = 12 * 1024 * 1024;
+// Ported from the single-photo validator: a bad photo fails at generation time
+// otherwise, minutes later and with a useless error.
+const MIN_FILE_BYTES = 5 * 1024;      // empty or truncated file
+const MIN_PHOTO_DIM = 256;            // px per side — below this the try-on is poor
+const MAX_PHOTO_ASPECT = 2.6;         // wider/taller than this is a banner, not a person
+const ALLOWED_PHOTO_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+const MAX_PHOTO_B64 = 1500000;        // ~1.1 MB of JPEG per photo
+const MAX_TOTAL_B64 = 4500000;        // keeps the JSON body comfortably small
+// Progressively cheaper encodings, tried in order until one fits MAX_PHOTO_B64.
+// 1280px on the long edge is already more than the model uses for a reference.
+const ENCODE_STEPS = [[1280, 0.82], [1024, 0.72], [800, 0.62]];
+const GENERATE_TIMEOUT_MS = 180000;   // a hung request must not become a forever spinner
+const CANDIDATE_TTL_MS = 30 * 60 * 1000;
+
+let avatarPhotos = [];                // { id, dataUrl, base64, mimeType, fileName }
+let avatarCandidates = [];            // { path, url } from the server
+let selectedCandidate = null;         // candidatePath
+let avatarDraft = { name: 'Me' };     // name/measurements captured at generate time
+let avatarPane = 'idle';              // 'idle' | 'form' | 'progress' | 'candidates'
+
 function setupAvatarTab() {
-  const uploadArea = document.getElementById('avatar-upload-area');
   const uploadInput = document.getElementById('avatar-upload-input');
-  const uploadPreview = document.getElementById('avatar-upload-preview');
-  const uploadLabel = document.getElementById('avatar-upload-label');
-  const saveBtn = document.getElementById('save-avatar-btn');
 
-  // ── Upload validation ──────────────────────────────────────────────────────
-  // A good avatar photo is what makes the try-on work, so reject anything that
-  // clearly won't (wrong format, too big/tiny, low-res, banner-shaped) with a
-  // specific message telling the user how to fix it, instead of silently
-  // accepting a bad image and failing later at generation time.
-  const ALLOWED_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
-  const MAX_BYTES = 12 * 1024 * 1024; // 12 MB — server/base64 upload ceiling
-  const MIN_BYTES = 5 * 1024;         // 5 KB — catch empty/corrupt files
-  const MIN_DIM = 256;                // px per side — below this, try-on is poor
-  const MAX_ASPECT = 2.6;             // wider/taller than this isn't a person photo
+  document.getElementById('avatar-upload-area').addEventListener('click', () => uploadInput.click());
+  uploadInput.addEventListener('change', handlePhotoSelection);
 
-  const errEl = document.getElementById('avatar-upload-required');
-  const showAvatarError = msg => {
-    errEl.textContent = '⚠️ ' + msg;
-    errEl.classList.remove('hidden');
-  };
-  const clearAvatarError = () => errEl.classList.add('hidden');
-  const resetUpload = () => {
-    uploadInput.value = '';
-    uploadPreview.removeAttribute('src');
-    uploadPreview.classList.add('hidden');
-    uploadLabel.classList.remove('hidden');
-  };
-
-  uploadArea.addEventListener('click', () => uploadInput.click());
-
-  uploadInput.addEventListener('change', e => {
-    const file = e.target.files[0];
-    if (!file) return;
-    clearAvatarError();
-
-    // 1. Format — only real photo formats the model accepts.
-    const type = (file.type || '').toLowerCase();
-    const name = (file.name || '').toLowerCase();
-    if (!ALLOWED_TYPES.includes(type)) {
-      if (type.includes('heic') || type.includes('heif') || /\.(heic|heif)$/.test(name)) {
-        showAvatarError('HEIC photos aren’t supported. On iPhone, save/convert the photo to JPG or PNG first.');
-      } else {
-        showAvatarError('Unsupported file. Please upload a JPG, PNG, or WebP image.');
-      }
-      resetUpload();
-      return;
-    }
-
-    // 2. Size bounds.
-    if (file.size > MAX_BYTES) {
-      showAvatarError(`Image is too large (${(file.size / 1048576).toFixed(1)} MB). Please use one under 12 MB.`);
-      resetUpload();
-      return;
-    }
-    if (file.size < MIN_BYTES) {
-      showAvatarError('That image looks empty or corrupted. Please choose another photo.');
-      resetUpload();
-      return;
-    }
-
-    // 3. Decode to verify it's a real image and check dimensions/shape.
-    const reader = new FileReader();
-    reader.onerror = () => { showAvatarError('Could not read that file. Please choose another photo.'); resetUpload(); };
-    reader.onload = () => {
-      const img = new Image();
-      img.onload = () => {
-        const w = img.naturalWidth, h = img.naturalHeight;
-        if (w < MIN_DIM || h < MIN_DIM) {
-          showAvatarError(`Image is too small (${w}×${h}px). Please use at least ${MIN_DIM}×${MIN_DIM}px — a clear, full-body photo works best.`);
-          resetUpload();
-          return;
-        }
-        if (Math.max(w, h) / Math.min(w, h) > MAX_ASPECT) {
-          showAvatarError('This looks like a banner or cropped strip, not a portrait. Please upload a normal photo of yourself.');
-          resetUpload();
-          return;
-        }
-        // Passed all checks — show the preview.
-        uploadPreview.src = reader.result;
-        uploadPreview.classList.remove('hidden');
-        uploadLabel.classList.add('hidden');
-      };
-      img.onerror = () => { showAvatarError('That image couldn’t be decoded. Please upload a valid JPG, PNG, or WebP.'); resetUpload(); };
-      img.src = reader.result;
-    };
-    reader.readAsDataURL(file);
-  });
-
-  saveBtn.addEventListener('click', async () => {
-    const src = uploadPreview.src;
-    if (!src || src === window.location.href) {
-      showAvatarError('Please upload a photo to generate your avatar.');
-      return;
-    }
-    clearAvatarError();
-
-    const name = document.getElementById('avatar-name').value.trim() || 'Me';
-    saveBtn.textContent = '⏳ Saving...';
-    saveBtn.disabled = true;
-    try {
-      avatar = await saveAvatarRemote(name, src);
-    } catch (err) {
-      // Fallback: keep photo locally if upload fails
-      avatar = { name, photoUrl: src, createdAt: Date.now() };
-      console.error('Avatar upload failed:', err.message);
-    }
+  document.getElementById('save-avatar-btn').addEventListener('click', handleAvatarGenerate);
+  document.getElementById('avatar-commit-btn').addEventListener('click', handleAvatarCommit);
+  document.getElementById('avatar-restart-btn').addEventListener('click', async () => {
+    await clearStoredCandidates();
+    avatarPane = 'form';
     renderAvatarTab();
   });
+
+  renderAvatarTab();
+  restoreStoredCandidates();
 }
+
+// ── Photo intake ─────────────────────────────────────────────────────────────
+
+async function handlePhotoSelection(e) {
+  const files = Array.from(e.target.files || []);
+  e.target.value = ''; // so the same file can be re-picked after a removal
+  if (files.length === 0) return;
+
+  clearAvatarError();
+  const room = MAX_PHOTOS - avatarPhotos.length;
+  if (room <= 0) {
+    showAvatarError(`You can use up to ${MAX_PHOTOS} photos — remove one first.`);
+    return;
+  }
+
+  // Additive: new files join the existing set rather than replacing it.
+  const accepted = files.slice(0, room);
+  const problems = files.length > room
+    ? [`Only ${room} of ${files.length} photos were added (${MAX_PHOTOS} max).`]
+    : [];
+
+  const btn = document.getElementById('save-avatar-btn');
+  btn.disabled = true;
+  setUploadLabel('Processing photos…');
+  for (const file of accepted) {
+    try {
+      avatarPhotos.push(await processPhotoFile(file));
+    } catch (err) {
+      problems.push(`${file.name}: ${err.message}`);
+    }
+  }
+  btn.disabled = false;
+  renderPhotoStrip();
+  if (problems.length > 0) showAvatarError(problems.join(' '));
+}
+
+// Downscale and re-encode before base64: an untouched 20 MB phone photo becomes a
+// ~27 MB JSON body, and the model gains nothing above ~1280px.
+async function processPhotoFile(file) {
+  if (file.size > MAX_FILE_BYTES) {
+    throw new Error(
+      `${(file.size / 1048576).toFixed(1)} MB is too large (${MAX_FILE_BYTES / 1048576} MB max).`
+    );
+  }
+  if (file.size < MIN_FILE_BYTES) throw new Error('looks empty or corrupted.');
+
+  // Checked by type and extension before decoding, so HEIC gets its own message
+  // rather than surfacing as a generic decode failure.
+  const type = (file.type || '').toLowerCase();
+  if (!ALLOWED_PHOTO_TYPES.includes(type)) {
+    if (type.includes('heic') || type.includes('heif') || /\.(heic|heif)$/i.test(file.name || '')) {
+      throw new Error("is HEIC — Chrome can't open it. On iPhone, save it as JPG or PNG first.");
+    }
+    throw new Error('is not a JPG, PNG, or WebP image.');
+  }
+
+  let bitmap;
+  try {
+    bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
+  } catch {
+    // Chrome cannot decode HEIC/HEIF, which is the iPhone default format.
+    throw new Error("could not be read — Chrome can't open HEIC photos. Export it as JPEG and retry.");
+  }
+
+  if (bitmap.width < MIN_PHOTO_DIM || bitmap.height < MIN_PHOTO_DIM) {
+    bitmap.close?.();
+    throw new Error(
+      `is too small (${bitmap.width}x${bitmap.height}px) — use at least ${MIN_PHOTO_DIM}x${MIN_PHOTO_DIM}px.`
+    );
+  }
+  if (Math.max(bitmap.width, bitmap.height) / Math.min(bitmap.width, bitmap.height) > MAX_PHOTO_ASPECT) {
+    bitmap.close?.();
+    throw new Error('looks like a banner or cropped strip, not a photo of a person.');
+  }
+
+  try {
+    let encoded = null;
+    for (const [maxDim, quality] of ENCODE_STEPS) {
+      const scale = Math.min(1, maxDim / Math.max(bitmap.width, bitmap.height));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+      canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+      canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      const dataUrl = canvas.toDataURL('image/jpeg', quality);
+      encoded = { dataUrl, base64: dataUrl.split(',')[1] || '' };
+      if (encoded.base64.length > 0 && encoded.base64.length <= MAX_PHOTO_B64) break;
+    }
+
+    if (!encoded || encoded.base64.length === 0) throw new Error('could not be encoded as JPEG.');
+    if (encoded.base64.length > MAX_PHOTO_B64) {
+      throw new Error('is too large even after downscaling — try a different photo.');
+    }
+
+    return {
+      id: `photo_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      dataUrl: encoded.dataUrl,
+      base64: encoded.base64,
+      mimeType: 'image/jpeg', // always, because we just re-encoded it
+      fileName: file.name,
+    };
+  } finally {
+    bitmap.close?.();
+  }
+}
+
+function renderPhotoStrip() {
+  const strip = document.getElementById('avatar-photo-strip');
+  strip.innerHTML = '';
+  strip.classList.toggle('hidden', avatarPhotos.length === 0);
+
+  avatarPhotos.forEach(photo => {
+    const cell = document.createElement('div');
+    cell.className = 'photo-thumb';
+    cell.innerHTML = `<img alt=""><button type="button" class="photo-thumb-remove" title="Remove photo" aria-label="Remove photo">✕</button>`;
+    // data: URL via .src — interpolating one into innerHTML trips the extension CSP.
+    const img = cell.querySelector('img');
+    img.src = photo.dataUrl;
+    img.alt = photo.fileName || 'Selected photo';
+    cell.querySelector('.photo-thumb-remove').addEventListener('click', () => {
+      avatarPhotos = avatarPhotos.filter(p => p.id !== photo.id);
+      clearAvatarError();
+      renderPhotoStrip();
+    });
+    strip.appendChild(cell);
+  });
+
+  setUploadLabel();
+}
+
+function setUploadLabel(text) {
+  const el = document.getElementById('avatar-upload-text');
+  if (text) {
+    el.textContent = text;
+    return;
+  }
+  const n = avatarPhotos.length;
+  if (n === 0) el.textContent = `Upload ${MIN_PHOTOS}–${MAX_PHOTOS} photos`;
+  else if (n >= MAX_PHOTOS) el.textContent = `${n} photos — remove one to swap`;
+  else if (n < MIN_PHOTOS) el.textContent = `${n} photo — add at least ${MIN_PHOTOS - n} more`;
+  else el.textContent = `${n} photos — add up to ${MAX_PHOTOS - n} more`;
+}
+
+function showAvatarError(message) {
+  const el = document.getElementById('avatar-form-error');
+  el.textContent = message;
+  el.classList.remove('hidden');
+}
+
+function clearAvatarError() {
+  document.getElementById('avatar-form-error').classList.add('hidden');
+}
+
+// fetch() rejects with a bare TypeError ("Failed to fetch") when the network is
+// down — not a message worth putting in front of a user.
+function avatarErrorText(err) {
+  return err.name === 'TypeError'
+    ? 'Could not reach the server — check your connection and try again.'
+    : err.message;
+}
+
+// Mirrors the server's zod bounds so a typo is an inline message, not a 400.
+// ── Generate ─────────────────────────────────────────────────────────────────
+
+async function handleAvatarGenerate() {
+  const btn = document.getElementById('save-avatar-btn');
+  clearAvatarError();
+
+  if (avatarPhotos.length < MIN_PHOTOS) {
+    showAvatarError(
+      `Add at least ${MIN_PHOTOS} photos — using several is what keeps your face consistent across the generated avatars.`
+    );
+    return;
+  }
+
+  const totalB64 = avatarPhotos.reduce((sum, p) => sum + p.base64.length, 0);
+  if (totalB64 > MAX_TOTAL_B64) {
+    showAvatarError(
+      `These ${avatarPhotos.length} photos are too large to send together (${(totalB64 / 1048576).toFixed(1)} MB). Remove one and try again.`
+    );
+    return;
+  }
+
+  avatarDraft = {
+    name: document.getElementById('avatar-name').value.trim() || 'Me',
+  };
+
+  // The request can only settle or abort, and both paths leave the progress pane.
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), GENERATE_TIMEOUT_MS);
+  const startedAt = Date.now();
+  const progressText = document.getElementById('avatar-progress-text');
+  progressText.textContent = 'Generating 3 avatars — 0s';
+  const tick = setInterval(() => {
+    progressText.textContent = `Generating 3 avatars — ${Math.round((Date.now() - startedAt) / 1000)}s`;
+  }, 1000);
+
+  btn.disabled = true;
+  avatarPane = 'progress';
+  renderAvatarTab();
+
+  try {
+    avatarCandidates = await generateAvatarCandidates({
+      photos: avatarPhotos.map(p => ({ base64: p.base64, mimeType: p.mimeType })),
+      name: avatarDraft.name,
+      signal: controller.signal,
+    });
+    selectedCandidate = avatarCandidates.length === 1 ? avatarCandidates[0].path : null;
+    await storeCandidates();
+    avatarPane = 'candidates';
+    renderAvatarTab();
+  } catch (err) {
+    avatarPane = 'form';
+    renderAvatarTab();
+    showAvatarError(
+      err.name === 'AbortError'
+        ? 'Generation timed out after 3 minutes. Your photos are still selected — try again.'
+        : avatarErrorText(err)
+    );
+  } finally {
+    clearTimeout(timeoutId);
+    clearInterval(tick);
+    btn.disabled = false;
+  }
+}
+
+// ── Candidate picker ─────────────────────────────────────────────────────────
+
+function renderCandidateGrid() {
+  const grid = document.getElementById('avatar-candidate-grid');
+  const note = document.getElementById('avatar-candidate-note');
+  const commitBtn = document.getElementById('avatar-commit-btn');
+  grid.innerHTML = '';
+
+  if (avatarCandidates.length === 0) {
+    grid.innerHTML = `
+      <div class="empty-state" style="grid-column:1/-1">
+        <div class="empty-icon">${ICON.alert}</div>
+        <h3>Nothing to choose from</h3>
+        <p>Generation returned no usable avatars. Start over to try again.</p>
+      </div>`;
+    note.textContent = '';
+    commitBtn.disabled = true;
+    return;
+  }
+
+  avatarCandidates.forEach((candidate, i) => {
+    const card = document.createElement('div');
+    card.className = `candidate-card${selectedCandidate === candidate.path ? ' selected' : ''}`;
+    card.innerHTML = `<img alt="Avatar option ${i + 1}" loading="lazy"><span class="candidate-check">✓</span>`;
+    const img = card.querySelector('img');
+    img.src = candidate.url;
+    // A dead signed URL should look broken, not blank — the file may still be there.
+    img.addEventListener('error', () => card.classList.add('candidate-broken'));
+    card.addEventListener('click', () => {
+      selectedCandidate = candidate.path;
+      renderCandidateGrid();
+    });
+    grid.appendChild(card);
+  });
+
+  // Fewer than 3 means part of the cascade failed — say so rather than quietly
+  // showing two and letting the user wonder.
+  note.textContent = avatarCandidates.length < 3
+    ? `Only ${avatarCandidates.length} of 3 avatars came back. Pick one, or start over to try for a full set.`
+    : 'Only the one you pick is kept — the rest are deleted.';
+
+  commitBtn.disabled = !selectedCandidate;
+}
+
+async function handleAvatarCommit() {
+  if (!selectedCandidate) return;
+
+  const btn = document.getElementById('avatar-commit-btn');
+  const errEl = document.getElementById('avatar-candidate-error');
+  errEl.classList.add('hidden');
+  btn.disabled = true;
+  btn.textContent = 'Saving…';
+
+  try {
+    avatar = await commitAvatarCandidate({
+      candidatePath: selectedCandidate,
+      name: avatarDraft.name,
+    });
+    await clearStoredCandidates();
+    avatarPhotos = [];
+    renderPhotoStrip();
+    avatarPane = 'idle';
+    renderAvatarTab();
+  } catch (err) {
+    // No local fabrication: if the server did not save it, the user does not have one.
+    errEl.textContent = avatarErrorText(err);
+    errEl.classList.remove('hidden');
+    btn.disabled = false;
+  } finally {
+    btn.textContent = 'Use This One';
+  }
+}
+
+// ── Candidate persistence ────────────────────────────────────────────────────
+// Candidates live server-side under candidates/ until the next generate, so a popup
+// closed mid-pick can resume instead of paying for another generation. Anything
+// older than the TTL is treated as stale and dropped.
+
+async function storeCandidates() {
+  await chromeSet('local', {
+    avatarCandidateDraft: {
+      candidates: avatarCandidates,
+      draft: avatarDraft,
+      createdAt: Date.now(),
+    },
+  });
+}
+
+async function clearStoredCandidates() {
+  avatarCandidates = [];
+  selectedCandidate = null;
+  await chromeSet('local', { avatarCandidateDraft: null });
+}
+
+async function restoreStoredCandidates() {
+  const { avatarCandidateDraft: saved } = await chromeGet('local', ['avatarCandidateDraft']);
+  if (!saved?.candidates?.length) return;
+  if (Date.now() - (saved.createdAt || 0) > CANDIDATE_TTL_MS) {
+    await clearStoredCandidates();
+    return;
+  }
+
+  avatarCandidates = saved.candidates;
+  avatarDraft = saved.draft || avatarDraft;
+  selectedCandidate = null;
+  document.getElementById('avatar-name').value = avatarDraft.name || '';
+  avatarPane = 'candidates';
+  renderAvatarTab();
+}
+
+// ── Panes ────────────────────────────────────────────────────────────────────
 
 function renderAvatarTab() {
   const display = document.getElementById('avatar-display');
   const form = document.getElementById('avatar-form');
+  const progress = document.getElementById('avatar-progress');
+  const picker = document.getElementById('avatar-candidates');
 
-  if (avatar) {
-    // Build shell HTML first — assign data: URL via .src to satisfy Chrome extension CSP.
-    display.innerHTML = `
-      <img id="avatar-display-img" alt="Your Avatar">
-      <p class="avatar-name-display">${esc(avatar.name)}</p>
-      <div class="avatar-actions">
-        <button class="secondary-btn" id="change-avatar-btn">Change Avatar</button>
-      </div>
-    `;
-    document.getElementById('avatar-display-img').src = avatar.photoUrl;
+  const pane = avatarPane === 'idle' ? (avatar ? 'display' : 'form') : avatarPane;
+  display.classList.toggle('hidden', pane !== 'display');
+  form.classList.toggle('hidden', pane !== 'form');
+  progress.classList.toggle('hidden', pane !== 'progress');
+  picker.classList.toggle('hidden', pane !== 'candidates');
 
-    display.classList.remove('hidden');
-    form.classList.add('hidden');
+  if (pane === 'candidates') renderCandidateGrid();
+  if (pane !== 'display') return;
 
-    document.getElementById('change-avatar-btn').addEventListener('click', () => {
-      document.getElementById('avatar-name').value = avatar.name || '';
-      display.classList.add('hidden');
-      form.classList.remove('hidden');
-    });
-  } else {
-    display.classList.add('hidden');
-    form.classList.remove('hidden');
-  }
+  // Build shell HTML first — assign the photo URL via .src to satisfy the extension CSP.
+  display.innerHTML = `
+    <img id="avatar-display-img" alt="Your Avatar">
+    <p class="avatar-name-display">${esc(avatar.name)}</p>
+    <div class="avatar-actions">
+      <button class="secondary-btn" id="change-avatar-btn">Change Avatar</button>
+    </div>
+  `;
+  document.getElementById('avatar-display-img').src = avatar.photoUrl;
+
+  document.getElementById('change-avatar-btn').addEventListener('click', () => {
+    document.getElementById('avatar-name').value = avatar.name || '';
+    clearAvatarError();
+    avatarPane = 'form';
+    renderAvatarTab();
+  });
 }
 
 // ===== TRY ON TAB =====
@@ -823,8 +1048,8 @@ async function handleTryOn() {
         ${warningHtml}
         <img id="tryon-result-img" alt="Virtual Try-On">
         <div class="tryon-result-actions">
-          <button class="secondary-btn" id="retry-tryon-btn">↺ Try Again</button>
-          <button class="secondary-btn" id="save-look-btn">💾 Save This Look</button>
+          <button class="secondary-btn" id="retry-tryon-btn">Try Again</button>
+          <button class="secondary-btn" id="save-look-btn">Save This Look</button>
         </div>
       `;
       document.getElementById('tryon-result-img').src = imageUrl;
@@ -856,7 +1081,7 @@ async function handleTryOn() {
     if (isLimitHit) {
       result.innerHTML = `
         <div class="empty-state">
-          <div class="empty-icon">✨</div>
+          <div class="empty-icon">${ICON.sparkle}</div>
           <h3>Free limit reached</h3>
           <p>You've used all your free try-ons. <a href="mailto:aakankshagyan3010@gmail.com?subject=Aura%20Pro%20Access" style="color:#000;font-weight:600">Join the Pro waitlist →</a></p>
         </div>`;
@@ -865,10 +1090,10 @@ async function handleTryOn() {
     } else {
       result.innerHTML = `
         <div class="empty-state">
-          <div class="empty-icon">⚠️</div>
+          <div class="empty-icon">${ICON.alert}</div>
           <h3>Try-on failed</h3>
           <p>${esc(err.message)}</p>
-          <button class="secondary-btn" id="retry-tryon-btn" style="margin-top:8px">↺ Try Again</button>
+          <button class="secondary-btn" id="retry-tryon-btn">Try Again</button>
         </div>`;
       document.getElementById('retry-tryon-btn')?.addEventListener('click', handleTryOn);
     }
