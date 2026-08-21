@@ -728,13 +728,6 @@ header {
   color: var(--primary);
 }
 
-.avatar-stats-display {
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--secondary);
-}
 
 .avatar-actions {
   display: flex;
@@ -756,7 +749,6 @@ header {
 }
 
 .form-row { display: flex; gap: var(--stack-sm); }
-.form-row.two-col > * { flex: 1; }
 
 .form-row input,
 .form-row select,
@@ -808,11 +800,6 @@ header {
 .upload-icon { display: flex; line-height: 0; }
 .upload-label em { color: var(--secondary); font-style: normal; }
 
-.form-hint {
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--secondary);
-}
 
 /* Selected photos — 4 up, so a full set fits one row of the 350px column */
 .photo-strip {

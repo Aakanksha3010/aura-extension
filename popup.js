@@ -565,29 +565,11 @@ function avatarErrorText(err) {
 }
 
 // Mirrors the server's zod bounds so a typo is an inline message, not a 400.
-function readMeasurement(id, label, min, max) {
-  const raw = document.getElementById(id).value.trim();
-  if (!raw) return undefined;
-  const value = Number(raw);
-  if (!Number.isFinite(value)) throw new Error(`${label} must be a number.`);
-  if (value < min || value > max) throw new Error(`${label} must be between ${min} and ${max}.`);
-  return value;
-}
-
 // ── Generate ─────────────────────────────────────────────────────────────────
 
 async function handleAvatarGenerate() {
   const btn = document.getElementById('save-avatar-btn');
   clearAvatarError();
-
-  let heightCm, weightKg;
-  try {
-    heightCm = readMeasurement('avatar-height', 'Height', 50, 260);
-    weightKg = readMeasurement('avatar-weight', 'Weight', 20, 400);
-  } catch (err) {
-    showAvatarError(err.message);
-    return;
-  }
 
   if (avatarPhotos.length < MIN_PHOTOS) {
     showAvatarError(
@@ -606,8 +588,6 @@ async function handleAvatarGenerate() {
 
   avatarDraft = {
     name: document.getElementById('avatar-name').value.trim() || 'Me',
-    heightCm,
-    weightKg,
   };
 
   // The request can only settle or abort, and both paths leave the progress pane.
@@ -628,8 +608,6 @@ async function handleAvatarGenerate() {
     avatarCandidates = await generateAvatarCandidates({
       photos: avatarPhotos.map(p => ({ base64: p.base64, mimeType: p.mimeType })),
       name: avatarDraft.name,
-      heightCm,
-      weightKg,
       signal: controller.signal,
     });
     selectedCandidate = avatarCandidates.length === 1 ? avatarCandidates[0].path : null;
@@ -708,8 +686,6 @@ async function handleAvatarCommit() {
     avatar = await commitAvatarCandidate({
       candidatePath: selectedCandidate,
       name: avatarDraft.name,
-      heightCm: avatarDraft.heightCm,
-      weightKg: avatarDraft.weightKg,
     });
     await clearStoredCandidates();
     avatarPhotos = [];
@@ -759,8 +735,6 @@ async function restoreStoredCandidates() {
   avatarDraft = saved.draft || avatarDraft;
   selectedCandidate = null;
   document.getElementById('avatar-name').value = avatarDraft.name || '';
-  document.getElementById('avatar-height').value = avatarDraft.heightCm ?? '';
-  document.getElementById('avatar-weight').value = avatarDraft.weightKg ?? '';
   avatarPane = 'candidates';
   renderAvatarTab();
 }
@@ -782,16 +756,10 @@ function renderAvatarTab() {
   if (pane === 'candidates') renderCandidateGrid();
   if (pane !== 'display') return;
 
-  const stats = [
-    avatar.heightCm ? `${avatar.heightCm} cm` : '',
-    avatar.weightKg ? `${avatar.weightKg} kg` : '',
-  ].filter(Boolean).join(' · ');
-
   // Build shell HTML first — assign the photo URL via .src to satisfy the extension CSP.
   display.innerHTML = `
     <img id="avatar-display-img" alt="Your Avatar">
     <p class="avatar-name-display">${esc(avatar.name)}</p>
-    ${stats ? `<p class="avatar-stats-display">${esc(stats)}</p>` : ''}
     <div class="avatar-actions">
       <button class="secondary-btn" id="change-avatar-btn">Change Avatar</button>
     </div>
@@ -800,8 +768,6 @@ function renderAvatarTab() {
 
   document.getElementById('change-avatar-btn').addEventListener('click', () => {
     document.getElementById('avatar-name').value = avatar.name || '';
-    document.getElementById('avatar-height').value = avatar.heightCm ?? '';
-    document.getElementById('avatar-weight').value = avatar.weightKg ?? '';
     clearAvatarError();
     avatarPane = 'form';
     renderAvatarTab();
