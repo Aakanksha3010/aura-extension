@@ -122,20 +122,23 @@ const bodyRegion = (cat: string): string => {
   }
 }
 
-async function runGeminiTryOn(
-  geminiKey: string,
-  avatarBase64: string,
-  avatarMimeType: string,
-  clothingItems: ClothingItem[],
-): Promise<EngineResult> {
-  const descriptions = clothingItems.map(item =>
-    `${item.brand ? item.brand + ' ' : ''}${item.name}`.trim()
-  )
-  const garmentLines = clothingItems.map((item, i) =>
-    `- Image ${i + 2}: '${descriptions[i]}' → applies to: ${bodyRegion(item.category)}`
-  ).join(String.fromCharCode(10))
+// ── Prompt variants ───────────────────────────────────────────────────────────
+//
+// Both variants are kept verbatim so they can be compared on real traffic rather
+// than on opinion. `prompt_version` in usage_logs records which one served each
+// request; see migration 008.
+//
+//   v1-editor — treats the avatar as a photograph to retouch, changing only the
+//     clothing pixels. Maximum identity safety, but the garment cannot alter the
+//     silhouette, so results read as pasted-on.
+//   v2-studio — treats the avatar as a studio subject being re-photographed in the
+//     outfit. Face is still locked; the body outline is allowed to change where the
+//     garment requires it, which is what stops it looking superimposed.
 
-  const prompt = `You are an expert photo EDITOR performing a virtual try-on. You are NOT generating a new image — you are EDITING the existing photograph in Image 1 and changing ONLY the clothing.
+type PromptVariant = 'v1-editor' | 'v2-studio'
+
+const TRYON_PROMPTS: Record<PromptVariant, (garmentLines: string) => string> = {
+  'v1-editor': (garmentLines) => `You are an expert photo EDITOR performing a virtual try-on. You are NOT generating a new image — you are EDITING the existing photograph in Image 1 and changing ONLY the clothing.
 
 INPUTS:
 - Image 1: a photograph of the person. This exact photo is your canvas. Keep the person and the background as they are.
@@ -153,7 +156,75 @@ GARMENT FIDELITY:
 - Apply each garment ONLY to its specified body region. A DRESS covers the full body — do NOT add a separate pant or skirt underneath.
 - Every garment listed must appear, draped naturally with realistic folds and shadows.
 
-OUTPUT: one photorealistic image — the SAME person and pose as Image 1, full body head-to-toe, with only the clothing changed. Do NOT crop the head or feet.`
+OUTPUT: one photorealistic image — the SAME person and pose as Image 1, full body head-to-toe, with only the clothing changed. Do NOT crop the head or feet.`,
+
+  'v2-studio': (garmentLines) => `You are a fashion photographer producing a studio lookbook shot. Image 1 is a studio reference photograph of your model. Photograph THAT SAME MODEL, in the SAME studio, wearing the outfit below.
+
+INPUTS:
+- Image 1: the model. This is a real person and the output must be unmistakably them.
+${garmentLines}
+
+TASK: Produce a single photorealistic studio photograph of the model wearing ALL the garment(s) above as one complete outfit, replacing whatever they are currently wearing.
+
+IDENTITY LOCK (highest priority — never violate):
+- The face, facial features, expression, skin tone, hair and head must remain IDENTICAL to Image 1. Do NOT redraw, beautify, slim, age, or restyle the person.
+- Keep their build, height and proportions, their pose, and the camera angle, distance and framing.
+- If preserving the face perfectly conflicts with the garment, favor the face — an unchanged face matters more than a perfect garment.
+
+THE GARMENT IS REAL CLOTHING, NOT AN OVERLAY:
+- It has volume and thickness. It may change the model's OUTLINE — a coat is wider than a shirt, a skirt flares away from the leg, a heel changes where the foot meets the floor.
+- It hangs under gravity with folds, creases and drape that follow the body underneath.
+- It casts contact shadows onto the model and onto the floor, lit by the same studio lighting as Image 1.
+- It occludes what is behind it: hems, cuffs and collars sit over the body with correct layering, and edges are sharp where the fabric ends.
+- Where the outfit does not cover the body, the model's own skin, arms and legs are visible and correctly lit.
+
+GARMENT FIDELITY:
+- Reproduce each garment's exact color, pattern, texture and design from its image.
+- Apply each garment ONLY to its specified body region. A DRESS covers the full body — do NOT add a separate pant or skirt underneath.
+- Every garment listed must appear.
+
+OUTPUT: one photorealistic studio photograph — the same model, pose and studio backdrop as Image 1, full body head-to-toe, wearing the outfit. Do NOT crop the head or feet.`,
+}
+
+// Deterministic per-user assignment: a given user always sees the same variant, so
+// their results stay consistent across try-ons and the buckets stay comparable.
+// TRYON_PROMPT_VARIANT overrides it outright, which is how you test a variant
+// directly without waiting on the split.
+function pickPromptVariant(userId: string): PromptVariant {
+  const forced = Deno.env.get('TRYON_PROMPT_VARIANT')
+  if (forced === 'v1-editor' || forced === 'v2-studio') return forced
+  // FNV-1a plus a final avalanche. A plain `h * 31` rolling hash would leave
+  // `h % 2` equal to the parity of the character sum — a one-bit hash that splits
+  // evenly by luck and would bucket badly for any split other than 50/50.
+  let h = 2166136261
+  for (let i = 0; i < userId.length; i++) {
+    h ^= userId.charCodeAt(i)
+    h = Math.imul(h, 16777619) >>> 0
+  }
+  h ^= h >>> 16
+  h = Math.imul(h, 2246822507) >>> 0
+  // >>> 0 is load-bearing: ^= yields a SIGNED int32, and a negative h makes
+  // h % 100 negative, which is always < 50 — silently dumping every negative
+  // hash into one bucket and skewing the split to roughly 75/25.
+  h = (h ^ (h >>> 13)) >>> 0
+  return h % 100 < 50 ? 'v1-editor' : 'v2-studio'
+}
+
+async function runGeminiTryOn(
+  geminiKey: string,
+  avatarBase64: string,
+  avatarMimeType: string,
+  clothingItems: ClothingItem[],
+  promptVariant: PromptVariant,
+): Promise<EngineResult> {
+  const descriptions = clothingItems.map(item =>
+    `${item.brand ? item.brand + ' ' : ''}${item.name}`.trim()
+  )
+  const garmentLines = clothingItems.map((item, i) =>
+    `- Image ${i + 2}: '${descriptions[i]}' → applies to: ${bodyRegion(item.category)}`
+  ).join(String.fromCharCode(10))
+
+  const prompt = TRYON_PROMPTS[promptVariant](garmentLines)
 
   const garmentParts = clothingItems.map(item => ({
     inlineData: { mimeType: item.mimeType, data: item.base64 },
@@ -305,6 +376,7 @@ Deno.serve(async (req) => {
     // that no longer existed in this scope, so the failure path itself threw.
     const attemptErrors: string[] = []
     let result: EngineResult | null = null
+    const promptVariant = pickPromptVariant(user.id)
 
     // Engine 1: Gemini. Trimmed because keys pasted into the dashboard routinely
     // carry a trailing newline, which reads as an invalid key with no useful error.
@@ -312,7 +384,7 @@ Deno.serve(async (req) => {
     if (!geminiKey) {
       attemptErrors.push('gemini: GEMINI_API_KEY is not set')
     } else {
-      const g = await runGeminiTryOn(geminiKey, avatarBase64, avatarMimeType, clothingItems)
+      const g = await runGeminiTryOn(geminiKey, avatarBase64, avatarMimeType, clothingItems, promptVariant)
       if (g.ok) result = g
       else attemptErrors.push(g.reason ?? 'gemini failed')
     }
@@ -335,6 +407,7 @@ Deno.serve(async (req) => {
     if (!result?.ok || !result.bytes) {
       await admin.from('usage_logs').insert({
         user_id: user.id, action: 'try_on', model_used: null, success: false,
+        prompt_version: promptVariant,
       })
       console.error('All engines failed:', attemptErrors.join(' | '))
       return json({
@@ -358,6 +431,7 @@ Deno.serve(async (req) => {
     // Log usage
     await admin.from('usage_logs').insert({
       user_id: user.id, action: 'try_on', model_used: result.model ?? null, success: true,
+      prompt_version: result.model?.startsWith('gemini') ? promptVariant : null,
     })
 
     // A note the client can surface if some items couldn't be applied.
