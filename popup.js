@@ -874,7 +874,11 @@ function renderTryOnTab() {
     if (profile) {
       const remaining = (profile.try_on_limit || 25) - (profile.try_on_count || 0);
       if (remaining <= 0) {
-        counter.innerHTML = `No try-ons remaining. <a href="mailto:aakankshagyan3010@gmail.com?subject=Aura%20Pro%20Access" style="color:#000;font-weight:600">Join the Pro waitlist →</a>`;
+        counter.innerHTML = `No try-ons remaining. <a href="#" id="counter-buy-link" style="color:#000;font-weight:600">Get more \u2192</a>`;
+        counter.querySelector('#counter-buy-link')?.addEventListener('click', e => {
+          e.preventDefault();
+          handleBuyCredits();
+        });
         counter.className = 'tryon-counter tryon-counter--warn';
       } else {
         counter.textContent = `${remaining} of ${profile.try_on_limit} try-ons remaining`;
@@ -1083,8 +1087,10 @@ async function handleTryOn() {
         <div class="empty-state">
           <div class="empty-icon">${ICON.sparkle}</div>
           <h3>Free limit reached</h3>
-          <p>You've used all your free try-ons. <a href="mailto:aakankshagyan3010@gmail.com?subject=Aura%20Pro%20Access" style="color:#000;font-weight:600">Join the Pro waitlist →</a></p>
+          <p>You've used all your free try-ons. Add more to keep going.</p>
+          <button class="primary-btn" id="buy-credits-btn">Get more try-ons</button>
         </div>`;
+      document.getElementById('buy-credits-btn')?.addEventListener('click', handleBuyCredits);
       if (profile) profile.try_on_count = profile.try_on_limit;
       renderTryOnTab();
     } else {
@@ -1135,4 +1141,95 @@ function esc(str) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
+}
+
+// ===== BILLING =====
+
+// Opens Razorpay's hosted checkout in a normal browser tab.
+//
+// It has to be a tab, not an in-popup flow: MV3's default CSP is `script-src
+// 'self'`, so Razorpay's checkout.js cannot be loaded inside popup.html. It
+// also has to be a tab rather than a window the popup owns, because the popup
+// is destroyed the moment focus moves — there is nothing left to hold state.
+// So the flow is: open tab, user pays, user reopens the extension, and we
+// confirm the credits landed server-side.
+async function handleBuyCredits() {
+  const result = document.getElementById('tryon-result');
+
+  if (result) {
+    result.innerHTML = `
+      <div class="empty-state">
+        <div class="loader"><div class="spinner"></div><span>Opening checkout…</span></div>
+      </div>`;
+  }
+
+  try {
+    const { checkoutUrl, pack } = await createCheckoutLink();
+    chrome.tabs.create({ url: checkoutUrl });
+
+    if (result) {
+      const rupees = pack ? (pack.amountPaise / 100).toFixed(0) : null;
+      result.innerHTML = `
+        <div class="empty-state">
+          <div class="empty-icon">${ICON.sparkle}</div>
+          <h3>Complete payment in the new tab</h3>
+          <p>${pack ? `${esc(pack.label)} for ₹${esc(rupees)}. ` : ''}Come back here once it's done.</p>
+          <button class="primary-btn" id="confirm-payment-btn">I've paid — refresh</button>
+        </div>`;
+      document.getElementById('confirm-payment-btn')?.addEventListener('click', handleConfirmPayment);
+    }
+  } catch (err) {
+    if (result) {
+      result.innerHTML = `
+        <div class="empty-state">
+          <div class="empty-icon">${ICON.alert}</div>
+          <h3>Couldn't start checkout</h3>
+          <p>${esc(err.message)}</p>
+          <button class="secondary-btn" id="retry-buy-btn">Try Again</button>
+        </div>`;
+      document.getElementById('retry-buy-btn')?.addEventListener('click', handleBuyCredits);
+    }
+  }
+}
+
+// Re-reads quota from the server. Credits are granted by Razorpay's webhook,
+// which is asynchronous — a user can land back here a second before it fires,
+// so "no new credits yet" is a normal outcome and must not read as failure.
+async function handleConfirmPayment() {
+  const result = document.getElementById('tryon-result');
+  const btn = document.getElementById('confirm-payment-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Checking…'; }
+
+  const previousLimit = profile?.try_on_limit ?? 0;
+  const status = await fetchBillingStatus();
+
+  if (status?.quota) {
+    profile = { ...(profile || {}), ...status.quota };
+    renderTryOnTab();
+
+    if ((status.quota.try_on_limit ?? 0) > previousLimit) {
+      if (result) {
+        const remaining = (status.quota.try_on_limit || 0) - (status.quota.try_on_count || 0);
+        result.innerHTML = `
+          <div class="empty-state">
+            <div class="empty-icon">${ICON.sparkle}</div>
+            <h3>Credits added</h3>
+            <p>You have ${remaining} try-ons. Pick your items and generate.</p>
+          </div>`;
+      }
+      return;
+    }
+  }
+
+  if (btn) { btn.disabled = false; btn.textContent = "I've paid — refresh"; }
+  const note = document.getElementById('payment-pending-note');
+  if (note) {
+    note.textContent = 'Still not showing. Payments can take a few seconds to confirm — try again shortly.';
+  } else if (result) {
+    const p = document.createElement('p');
+    p.id = 'payment-pending-note';
+    p.style.cssText = 'font-size:12px;color:#666;margin-top:8px';
+    p.textContent = 'No new credits yet. Payments take a few seconds to confirm — try again shortly.';
+    result.querySelector('.empty-state')?.appendChild(p);
+  }
 }
