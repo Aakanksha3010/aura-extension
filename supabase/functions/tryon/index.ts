@@ -27,17 +27,27 @@ const CORS = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 }
 
+// Base64 is ~1.37x the byte size it encodes. 10M chars ~ 7.5MB per image, which
+// is far above a 1024px JPEG and far below anything that should reach a model
+// API. Unbounded before: the client downscales, but the server is what a
+// malicious client bypasses.
+const MAX_IMAGE_B64 = 10_000_000
+
+// Whitelisted rather than free text — mimeType was passed straight through to
+// the model API.
+const ImageMime = z.enum(['image/jpeg', 'image/png', 'image/webp'])
+
 const ClothingItemSchema = z.object({
-  base64: z.string().min(1),
-  mimeType: z.string().default('image/jpeg'),
+  base64: z.string().min(1).max(MAX_IMAGE_B64),
+  mimeType: ImageMime.default('image/jpeg'),
   name: z.string(),
   brand: z.string().optional(),
   category: z.enum(['top', 'bottom', 'dress', 'shoes', 'outerwear', 'accessory']),
 })
 
 const TryOnRequestSchema = z.object({
-  avatarBase64: z.string().min(1),
-  avatarMimeType: z.string().default('image/jpeg'),
+  avatarBase64: z.string().min(1).max(MAX_IMAGE_B64),
+  avatarMimeType: ImageMime.default('image/jpeg'),
   clothingItems: z.array(ClothingItemSchema).min(1).max(5),
 })
 
@@ -318,6 +328,10 @@ Deno.serve(async (req) => {
       headers: { ...CORS, 'Content-Type': 'application/json' },
     })
 
+  // Declared out here on purpose: a credit is reserved inside the try block,
+  // but the catch below is a sibling scope and could not otherwise refund it.
+  let refundOnFailure: ((why: string) => Promise<void>) | null = null
+
   try {
     const authHeader = req.headers.get('Authorization')
     if (!authHeader) return json({ error: 'Unauthorized' }, 401)
@@ -351,22 +365,45 @@ Deno.serve(async (req) => {
       )
     if (profileError) console.warn('Profile ensure failed:', profileError.message)
 
-    // Rate limit check
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('try_on_count, try_on_limit')
-      .eq('id', user.id)
-      .single()
+    // Reserve one try-on ATOMICALLY, before any generation happens.
+    //
+    // The previous version selected try_on_count, compared it in JS, and
+    // incremented after a successful generation. Two concurrent requests both
+    // read the same count and both passed the check, so a user at their limit
+    // could get free generations by firing requests in parallel. consume_try_on
+    // puts the limit test inside the UPDATE, so exactly one caller wins.
+    //
+    // It also runs through `admin`: migration 010 revoked UPDATE on profiles
+    // from `authenticated`, because row-level security cannot stop a user from
+    // PATCHing their own try_on_limit.
+    const { data: reserved, error: reserveError } = await admin.rpc('consume_try_on', {
+      p_user_id: user.id,
+    })
 
-    if (!profile) return json({ error: 'Profile not found' }, 404)
-    if (profile.try_on_count >= profile.try_on_limit) {
-      return json({ error: 'Free limit reached. Upgrade to Pro for unlimited try-ons.' }, 429)
+    if (reserveError) {
+      console.error('consume_try_on failed:', reserveError.message)
+      return json({ error: 'Could not verify your remaining try-ons.' }, 500)
+    }
+    if (!reserved) {
+      return json({ error: 'Free limit reached. Add more try-ons to keep going.' }, 429)
+    }
+
+    // Any failure past this point must hand the credit back — the user has been
+    // charged for an image they have not received.
+    let refunded = false
+    refundOnFailure = async (why: string) => {
+      if (refunded) return
+      refunded = true
+      const { error } = await admin.rpc('refund_try_on', { p_user_id: user.id })
+      if (error) console.error(`refund_try_on failed after ${why}:`, error.message)
+      else console.log('Refunded reserved try-on after', why)
     }
 
     // Validate request body
     const body = await req.json()
     const parsed = TryOnRequestSchema.safeParse(body)
     if (!parsed.success) {
+      await refundOnFailure?.('invalid request')
       return json({ error: 'Invalid request', details: parsed.error.issues }, 400)
     }
     const { avatarBase64, avatarMimeType, clothingItems } = parsed.data
@@ -410,6 +447,7 @@ Deno.serve(async (req) => {
         prompt_version: promptVariant,
       })
       console.error('All engines failed:', attemptErrors.join(' | '))
+      await refundOnFailure?.('all engines failed')
       return json({
         error: 'Try-on generation failed. Please try again.',
         detail: attemptErrors.join(' | '),
@@ -422,11 +460,7 @@ Deno.serve(async (req) => {
       .from('tryon-results')
       .upload(storagePath, result.bytes, { contentType: result.mimeType ?? 'image/png', upsert: false })
 
-    // Increment try_on_count
-    await supabase
-      .from('profiles')
-      .update({ try_on_count: profile.try_on_count + 1 })
-      .eq('id', user.id)
+    // try_on_count was already incremented by consume_try_on above.
 
     // Log usage
     await admin.from('usage_logs').insert({
@@ -453,6 +487,11 @@ Deno.serve(async (req) => {
     return json({ signedUrl: signedData?.signedUrl, storagePath, engine: result.model, note })
 
   } catch (error) {
+    // If the credit was already reserved, an unexpected throw must not leave
+    // the user charged for an image they never got.
+    if (refundOnFailure) {
+      try { await refundOnFailure('unhandled error') } catch { /* best effort */ }
+    }
     return json({ error: (error as Error).message }, 500)
   }
 })

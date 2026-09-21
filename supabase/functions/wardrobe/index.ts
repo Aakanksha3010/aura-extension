@@ -12,14 +12,25 @@ const CORS = {
   'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
 }
 
+// Base64 is ~1.37x the byte size it encodes. 10M chars ~ 7.5MB per image, which
+// is far above a 1024px JPEG and far below anything that should reach a model
+// API. Unbounded before: the client downscales, but the server is what a
+// malicious client bypasses.
+const MAX_IMAGE_B64 = 10_000_000
+
+// Whitelisted because this value becomes the stored object's contentType. Free
+// text let a caller upload 'text/html', which a signed URL would then serve as
+// a live page from the project's own domain.
+const ImageMime = z.enum(['image/jpeg', 'image/png', 'image/webp'])
+
 const WardrobeItemSchema = z.object({
   name: z.string().min(1).max(200),
   brand: z.string().max(100).optional(),
   price: z.string().max(50).optional(),
   category: z.enum(['top', 'bottom', 'dress', 'shoes', 'outerwear', 'accessory']),
   imageUrl: z.string().url().optional(),
-  imageBase64: z.string().optional(),
-  imageMimeType: z.string().default('image/jpeg'),
+  imageBase64: z.string().max(MAX_IMAGE_B64).optional(),
+  imageMimeType: ImageMime.default('image/jpeg'),
   productUrl: z.string().url().optional().or(z.literal('')),
   source: z.string().max(100).optional(),
 })

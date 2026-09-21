@@ -31,5 +31,12 @@ export const DEFAULT_PACK_ID = 'pack_50'
 
 export function getPack(id: unknown): Pack | null {
   if (typeof id !== 'string') return null
-  return PACKS[id] ?? null
+  // Object.hasOwn, not `PACKS[id] ?? null`. A plain object literal inherits
+  // from Object.prototype, so `PACKS['toString']` is a function and
+  // `PACKS['__proto__']` is Object.prototype — both truthy, both sailing past
+  // billing's `if (!pack)` guard and reaching Razorpay with an undefined
+  // amount. pack_id also arrives from webhook notes, so this is reachable
+  // from two directions.
+  if (!Object.hasOwn(PACKS, id)) return null
+  return PACKS[id]
 }

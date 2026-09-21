@@ -27,11 +27,25 @@ const IMAGE_MODELS = [
 ]
 
 const CANDIDATE_COUNT = 3
+
+// Each generate call costs CANDIDATE_COUNT image generations on our key.
+// Enrollment normally happens once; this bounds a runaway loop, not real use.
+const DAILY_AVATAR_GENERATES = 5
 const MAX_PHOTOS = 4 // model ceiling for character-consistency references
 
+// Base64 is ~1.37x the byte size it encodes. 10M chars ~ 7.5MB per image, which
+// is far above a 1024px JPEG and far below anything that should reach a model
+// API. Unbounded before: the client downscales, but the server is what a
+// malicious client bypasses.
+const MAX_IMAGE_B64 = 10_000_000
+
+// Whitelisted rather than free text — mimeType was passed straight through to
+// the model API.
+const ImageMime = z.enum(['image/jpeg', 'image/png', 'image/webp'])
+
 const PhotoSchema = z.object({
-  base64: z.string().min(1),
-  mimeType: z.string().default('image/jpeg'),
+  base64: z.string().min(1).max(MAX_IMAGE_B64),
+  mimeType: ImageMime.default('image/jpeg'),
 })
 
 const MeasurementFields = {
@@ -169,6 +183,29 @@ Deno.serve(async (req) => {
         return json({ error: 'Invalid request', details: parsed.error.issues }, 400)
       }
       const { photos, heightCm, weightKg } = parsed.data
+
+      // Cost guard. Enrollment is deliberately exempt from try_on_count, which
+      // left it exempt from EVERY limit — and each 'generate' fans out to
+      // CANDIDATE_COUNT Gemini image requests billed to our key. An
+      // authenticated user could loop this and drain the budget with nothing
+      // anywhere to stop or even count it.
+      //
+      // Fails CLOSED. If the counter is unavailable we cannot bound the spend,
+      // and unbounded spend is the worse outcome. The message names the cause
+      // so a missing migration 010 is diagnosable rather than mysterious.
+      const { data: usedToday, error: rateError } = await admin.rpc('avatar_generates_today', {
+        p_user_id: user.id,
+      })
+      if (rateError) {
+        console.error('avatar_generates_today failed (is migration 010 applied?):', rateError.message)
+        return json({ error: 'Avatar generation is temporarily unavailable.' }, 503)
+      }
+      if ((usedToday ?? 0) >= DAILY_AVATAR_GENERATES) {
+        return json(
+          { error: `You've reached today's avatar limit (${DAILY_AVATAR_GENERATES}). Try again tomorrow.` },
+          429
+        )
+      }
 
       const geminiKey = Deno.env.get('GEMINI_API_KEY')?.trim()
       if (!geminiKey) return json({ error: 'Image generation is not configured.' }, 500)
