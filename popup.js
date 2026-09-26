@@ -598,6 +598,14 @@ async function handleAvatarGenerate() {
   const btn = document.getElementById('save-avatar-btn');
   clearAvatarError();
 
+  // Checked before anything else, so no photo is transmitted without it. The
+  // box is unticked on every open — consent has to be an affirmative action,
+  // not a default the user never sees.
+  if (!document.getElementById('avatar-consent')?.checked) {
+    showAvatarError('Please confirm you agree to your photo being sent to Google to generate your avatar.');
+    return;
+  }
+
   if (avatarPhotos.length < MIN_PHOTOS) {
     showAvatarError(
       `Add at least ${MIN_PHOTOS} photos — using several is what keeps your face consistent across the generated avatars.`
@@ -1116,11 +1124,22 @@ function setupSettings() {
 
   document.getElementById('settings-btn').addEventListener('click', () => {
     modal.classList.remove('hidden');
+    renderDataSummary();
   });
 
-  const closeModal = () => modal.classList.add('hidden');
+  const closeModal = () => {
+    modal.classList.add('hidden');
+    // Leave the delete control disarmed, so reopening Settings never lands on
+    // a primed irreversible button.
+    deleteArmed = false;
+    const btn = document.getElementById('delete-account-btn');
+    if (btn) { btn.textContent = 'Delete my account and data'; btn.disabled = false; }
+    document.getElementById('delete-status')?.classList.add('hidden');
+  };
   document.getElementById('close-settings').addEventListener('click', closeModal);
   backdrop.addEventListener('click', closeModal);
+
+  document.getElementById('delete-account-btn')?.addEventListener('click', handleDeleteAccount);
 
   document.getElementById('sign-out-btn').addEventListener('click', async () => {
     await signOut();
@@ -1231,5 +1250,84 @@ async function handleConfirmPayment() {
     p.style.cssText = 'font-size:12px;color:#666;margin-top:8px';
     p.textContent = 'No new credits yet. Payments take a few seconds to confirm — try again shortly.';
     result.querySelector('.empty-state')?.appendChild(p);
+  }
+}
+
+// ===== DATA RIGHTS =====
+
+// Populates the Settings summary. Deliberately plain counts rather than a file
+// download — the honest answer to "what do you have on me" is a short list.
+async function renderDataSummary() {
+  const el = document.getElementById('data-summary');
+  if (!el) return;
+
+  const data = await fetchAccountData();
+  if (!data) {
+    el.textContent = 'Could not load your data summary.';
+    return;
+  }
+
+  const c = data.counts || {};
+  const parts = [
+    data.avatar ? 'an avatar' : 'no avatar',
+    `${c.wardrobeItems || 0} wardrobe item${c.wardrobeItems === 1 ? '' : 's'}`,
+    `${c.savedLooks || 0} saved look${c.savedLooks === 1 ? '' : 's'}`,
+    `${c.activityRecords || 0} activity record${c.activityRecords === 1 ? '' : 's'}`,
+  ];
+  const paid = (data.payments || []).filter(p => p.status === 'paid').length;
+  if (paid) parts.push(`${paid} purchase${paid === 1 ? '' : 's'}`);
+
+  el.textContent = `We hold your email, ${parts.join(', ')}.`;
+}
+
+// Two-step, because it cannot be undone and a mis-click costs someone their
+// avatar and wardrobe. The first click arms it; the second does it.
+let deleteArmed = false;
+
+async function handleDeleteAccount() {
+  const btn = document.getElementById('delete-account-btn');
+  const status = document.getElementById('delete-status');
+  if (!btn) return;
+
+  if (!deleteArmed) {
+    deleteArmed = true;
+    btn.textContent = 'Tap again to permanently delete';
+    if (status) {
+      status.classList.remove('hidden');
+      status.textContent = 'This erases your avatar, wardrobe, saved looks and account. It cannot be undone.';
+    }
+    // Disarm if they walk away from the decision.
+    setTimeout(() => {
+      if (!deleteArmed) return;
+      deleteArmed = false;
+      btn.textContent = 'Delete my account and data';
+      status?.classList.add('hidden');
+    }, 8000);
+    return;
+  }
+
+  deleteArmed = false;
+  btn.disabled = true;
+  btn.textContent = 'Deleting…';
+
+  try {
+    const result = await deleteAccount();
+    if (status) {
+      status.classList.remove('hidden');
+      status.textContent = `Deleted. ${result.filesRemoved || 0} file(s) removed. Signing you out…`;
+    }
+    // The session is dead server-side; clear it locally so the popup doesn't
+    // keep trying to use a token for a user that no longer exists.
+    setTimeout(async () => {
+      await signOut();
+      window.close();
+    }, 1600);
+  } catch (err) {
+    btn.disabled = false;
+    btn.textContent = 'Delete my account and data';
+    if (status) {
+      status.classList.remove('hidden');
+      status.textContent = err.message;
+    }
   }
 }

@@ -2,7 +2,11 @@
 
 chrome.runtime.onInstalled.addListener(() => {
   chrome.storage.local.set({ wardrobe: [], outfits: [] });
-  chrome.storage.sync.set({ geminiApiKey: '' });
+
+  // Note: a `geminiApiKey` sync-storage slot used to be seeded here, from when
+  // users supplied their own key. Generation is server-side now and nothing
+  // reads it, so it is no longer created.
+  chrome.storage.sync.remove('geminiApiKey');
 
   chrome.contextMenus.removeAll(() => {
     chrome.contextMenus.create({

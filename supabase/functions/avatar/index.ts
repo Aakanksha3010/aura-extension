@@ -6,7 +6,6 @@
 // POST /avatar { action: 'commit', candidatePath, name?, heightCm?, weightKg? }
 //        → promotes the chosen candidate to avatars/{userId}/avatar.jpg, saves the row,
 //          and deletes the unchosen candidates.
-// POST /avatar { photoBase64, ... } — legacy single-photo direct save (no generation).
 
 import { createClient } from 'npm:@supabase/supabase-js@2'
 import { z } from 'npm:zod@3'
@@ -67,11 +66,6 @@ const CommitSchema = z.object({
 })
 
 // Legacy path — a single photo saved directly with no generation step.
-const LegacySchema = z.object({
-  photoBase64: z.string().min(1),
-  photoMimeType: z.string().default('image/jpeg'),
-  ...MeasurementFields,
-})
 
 /** Soft, qualitative build hint. Deliberately not a numeric instruction — image models
  *  cannot be steered precisely by measurements, and pretending otherwise produces
@@ -391,45 +385,15 @@ Deno.serve(async (req) => {
       return json({ avatar: { ...avatar, signedPhotoUrl: await signed(storagePath) } })
     }
 
-    // ── POST legacy: single photo, saved as-is ───────────────────────────────
-    const parsed = LegacySchema.safeParse(body)
-    if (!parsed.success) {
-      return json({ error: 'Invalid request', details: parsed.error.issues }, 400)
-    }
-    const { name, photoBase64, photoMimeType, heightCm, weightKg } = parsed.data
-
-    const ext = photoMimeType.includes('png') ? 'png' : 'jpg'
-    const storagePath = `${user.id}/avatar.${ext}`
-
-    const { error: uploadError } = await admin.storage
-      .from('avatars')
-      .upload(storagePath, decode(photoBase64), { contentType: photoMimeType, upsert: true })
-    if (uploadError) {
-      return json({ error: 'Photo upload failed: ' + uploadError.message }, 500)
-    }
-
-    const { data: avatar, error: upsertError } = await supabase
-      .from('avatars')
-      .upsert(
-        {
-          user_id: user.id,
-          name,
-          photo_url: storagePath,
-          height_cm: heightCm ?? null,
-          weight_kg: weightKg ?? null,
-        },
-        { onConflict: 'user_id' }
-      )
-      .select()
-      .single()
-
-    if (upsertError) return json({ error: upsertError.message }, 500)
-
-    await admin.from('usage_logs').insert({
-      user_id: user.id, action: 'avatar_save', success: true,
-    })
-
-    return json({ avatar: { ...avatar, signedPhotoUrl: await signed(storagePath) } })
+    // The legacy single-photo direct-save path was REMOVED.
+    //
+    // It wrote the user's uploaded photograph to storage verbatim. Every other
+    // path stores only the AI-generated avatar and discards the original, and
+    // the privacy policy now states that — an endpoint contradicting it, still
+    // reachable by anyone holding a token even though no client has called it
+    // since the generate/commit flow shipped, would make the policy untrue.
+    // 410 Gone rather than 404: it existed and was withdrawn.
+    return json({ error: 'This endpoint has been removed. Use action: \'generate\'.' }, 410)
 
   } catch (error) {
     return json({ error: (error as Error).message }, 500)
