@@ -603,6 +603,14 @@ async function handleAvatarGenerate() {
   const btn = document.getElementById('save-avatar-btn');
   clearAvatarError();
 
+  // Checked before anything else, so no photo is transmitted without it. The
+  // box is unticked on every open — consent has to be an affirmative action,
+  // not a default the user never sees.
+  if (!document.getElementById('avatar-consent')?.checked) {
+    showAvatarError('Please confirm you agree to your photo being sent to Google to generate your avatar.');
+    return;
+  }
+
   if (avatarPhotos.length < MIN_PHOTOS) {
     showAvatarError('Add a photo of yourself to generate your avatar.');
     return;
@@ -877,7 +885,11 @@ function renderTryOnTab() {
     if (profile) {
       const remaining = (profile.try_on_limit || 25) - (profile.try_on_count || 0);
       if (remaining <= 0) {
-        counter.innerHTML = `No try-ons remaining. <a href="mailto:aakankshagyan3010@gmail.com?subject=Aura%20Pro%20Access" style="color:#000;font-weight:600">Join the Pro waitlist →</a>`;
+        counter.innerHTML = `No try-ons remaining. <a href="#" id="counter-buy-link" style="color:#000;font-weight:600">Get more \u2192</a>`;
+        counter.querySelector('#counter-buy-link')?.addEventListener('click', e => {
+          e.preventDefault();
+          handleBuyCredits();
+        });
         counter.className = 'tryon-counter tryon-counter--warn';
       } else {
         counter.textContent = `${remaining} of ${profile.try_on_limit} try-ons remaining`;
@@ -1086,8 +1098,10 @@ async function handleTryOn() {
         <div class="empty-state">
           <div class="empty-icon">${ICON.sparkle}</div>
           <h3>Free limit reached</h3>
-          <p>You've used all your free try-ons. <a href="mailto:aakankshagyan3010@gmail.com?subject=Aura%20Pro%20Access" style="color:#000;font-weight:600">Join the Pro waitlist →</a></p>
+          <p>You've used all your free try-ons. Add more to keep going.</p>
+          <button class="primary-btn" id="buy-credits-btn">Get more try-ons</button>
         </div>`;
+      document.getElementById('buy-credits-btn')?.addEventListener('click', handleBuyCredits);
       if (profile) profile.try_on_count = profile.try_on_limit;
       renderTryOnTab();
     } else {
@@ -1113,11 +1127,22 @@ function setupSettings() {
 
   document.getElementById('settings-btn').addEventListener('click', () => {
     modal.classList.remove('hidden');
+    renderDataSummary();
   });
 
-  const closeModal = () => modal.classList.add('hidden');
+  const closeModal = () => {
+    modal.classList.add('hidden');
+    // Leave the delete control disarmed, so reopening Settings never lands on
+    // a primed irreversible button.
+    deleteArmed = false;
+    const btn = document.getElementById('delete-account-btn');
+    if (btn) { btn.textContent = 'Delete my account and data'; btn.disabled = false; }
+    document.getElementById('delete-status')?.classList.add('hidden');
+  };
   document.getElementById('close-settings').addEventListener('click', closeModal);
   backdrop.addEventListener('click', closeModal);
+
+  document.getElementById('delete-account-btn')?.addEventListener('click', handleDeleteAccount);
 
   document.getElementById('sign-out-btn').addEventListener('click', async () => {
     await signOut();
@@ -1138,4 +1163,174 @@ function esc(str) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
+}
+
+// ===== BILLING =====
+
+// Opens Razorpay's hosted checkout in a normal browser tab.
+//
+// It has to be a tab, not an in-popup flow: MV3's default CSP is `script-src
+// 'self'`, so Razorpay's checkout.js cannot be loaded inside popup.html. It
+// also has to be a tab rather than a window the popup owns, because the popup
+// is destroyed the moment focus moves — there is nothing left to hold state.
+// So the flow is: open tab, user pays, user reopens the extension, and we
+// confirm the credits landed server-side.
+async function handleBuyCredits() {
+  const result = document.getElementById('tryon-result');
+
+  if (result) {
+    result.innerHTML = `
+      <div class="empty-state">
+        <div class="loader"><div class="spinner"></div><span>Opening checkout…</span></div>
+      </div>`;
+  }
+
+  try {
+    const { checkoutUrl, pack } = await createCheckoutLink();
+    chrome.tabs.create({ url: checkoutUrl });
+
+    if (result) {
+      const rupees = pack ? (pack.amountPaise / 100).toFixed(0) : null;
+      result.innerHTML = `
+        <div class="empty-state">
+          <div class="empty-icon">${ICON.sparkle}</div>
+          <h3>Complete payment in the new tab</h3>
+          <p>${pack ? `${esc(pack.label)} for ₹${esc(rupees)}. ` : ''}Come back here once it's done.</p>
+          <button class="primary-btn" id="confirm-payment-btn">I've paid — refresh</button>
+        </div>`;
+      document.getElementById('confirm-payment-btn')?.addEventListener('click', handleConfirmPayment);
+    }
+  } catch (err) {
+    if (result) {
+      result.innerHTML = `
+        <div class="empty-state">
+          <div class="empty-icon">${ICON.alert}</div>
+          <h3>Couldn't start checkout</h3>
+          <p>${esc(err.message)}</p>
+          <button class="secondary-btn" id="retry-buy-btn">Try Again</button>
+        </div>`;
+      document.getElementById('retry-buy-btn')?.addEventListener('click', handleBuyCredits);
+    }
+  }
+}
+
+// Re-reads quota from the server. Credits are granted by Razorpay's webhook,
+// which is asynchronous — a user can land back here a second before it fires,
+// so "no new credits yet" is a normal outcome and must not read as failure.
+async function handleConfirmPayment() {
+  const result = document.getElementById('tryon-result');
+  const btn = document.getElementById('confirm-payment-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Checking…'; }
+
+  const previousLimit = profile?.try_on_limit ?? 0;
+  const status = await fetchBillingStatus();
+
+  if (status?.quota) {
+    profile = { ...(profile || {}), ...status.quota };
+    renderTryOnTab();
+
+    if ((status.quota.try_on_limit ?? 0) > previousLimit) {
+      if (result) {
+        const remaining = (status.quota.try_on_limit || 0) - (status.quota.try_on_count || 0);
+        result.innerHTML = `
+          <div class="empty-state">
+            <div class="empty-icon">${ICON.sparkle}</div>
+            <h3>Credits added</h3>
+            <p>You have ${remaining} try-ons. Pick your items and generate.</p>
+          </div>`;
+      }
+      return;
+    }
+  }
+
+  if (btn) { btn.disabled = false; btn.textContent = "I've paid — refresh"; }
+  const note = document.getElementById('payment-pending-note');
+  if (note) {
+    note.textContent = 'Still not showing. Payments can take a few seconds to confirm — try again shortly.';
+  } else if (result) {
+    const p = document.createElement('p');
+    p.id = 'payment-pending-note';
+    p.style.cssText = 'font-size:12px;color:#666;margin-top:8px';
+    p.textContent = 'No new credits yet. Payments take a few seconds to confirm — try again shortly.';
+    result.querySelector('.empty-state')?.appendChild(p);
+  }
+}
+
+// ===== DATA RIGHTS =====
+
+// Populates the Settings summary. Deliberately plain counts rather than a file
+// download — the honest answer to "what do you have on me" is a short list.
+async function renderDataSummary() {
+  const el = document.getElementById('data-summary');
+  if (!el) return;
+
+  const data = await fetchAccountData();
+  if (!data) {
+    el.textContent = 'Could not load your data summary.';
+    return;
+  }
+
+  const c = data.counts || {};
+  const parts = [
+    data.avatar ? 'an avatar' : 'no avatar',
+    `${c.wardrobeItems || 0} wardrobe item${c.wardrobeItems === 1 ? '' : 's'}`,
+    `${c.savedLooks || 0} saved look${c.savedLooks === 1 ? '' : 's'}`,
+    `${c.activityRecords || 0} activity record${c.activityRecords === 1 ? '' : 's'}`,
+  ];
+  const paid = (data.payments || []).filter(p => p.status === 'paid').length;
+  if (paid) parts.push(`${paid} purchase${paid === 1 ? '' : 's'}`);
+
+  el.textContent = `We hold your email, ${parts.join(', ')}.`;
+}
+
+// Two-step, because it cannot be undone and a mis-click costs someone their
+// avatar and wardrobe. The first click arms it; the second does it.
+let deleteArmed = false;
+
+async function handleDeleteAccount() {
+  const btn = document.getElementById('delete-account-btn');
+  const status = document.getElementById('delete-status');
+  if (!btn) return;
+
+  if (!deleteArmed) {
+    deleteArmed = true;
+    btn.textContent = 'Tap again to permanently delete';
+    if (status) {
+      status.classList.remove('hidden');
+      status.textContent = 'This erases your avatar, wardrobe, saved looks and account. It cannot be undone.';
+    }
+    // Disarm if they walk away from the decision.
+    setTimeout(() => {
+      if (!deleteArmed) return;
+      deleteArmed = false;
+      btn.textContent = 'Delete my account and data';
+      status?.classList.add('hidden');
+    }, 8000);
+    return;
+  }
+
+  deleteArmed = false;
+  btn.disabled = true;
+  btn.textContent = 'Deleting…';
+
+  try {
+    const result = await deleteAccount();
+    if (status) {
+      status.classList.remove('hidden');
+      status.textContent = `Deleted. ${result.filesRemoved || 0} file(s) removed. Signing you out…`;
+    }
+    // The session is dead server-side; clear it locally so the popup doesn't
+    // keep trying to use a token for a user that no longer exists.
+    setTimeout(async () => {
+      await signOut();
+      window.close();
+    }, 1600);
+  } catch (err) {
+    btn.disabled = false;
+    btn.textContent = 'Delete my account and data';
+    if (status) {
+      status.classList.remove('hidden');
+      status.textContent = err.message;
+    }
+  }
 }

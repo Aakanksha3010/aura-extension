@@ -6,7 +6,6 @@
 // POST /avatar { action: 'commit', candidatePath, name?, heightCm?, weightKg? }
 //        → promotes the chosen candidate to avatars/{userId}/avatar.jpg, saves the row,
 //          and deletes the unchosen candidates.
-// POST /avatar { photoBase64, ... } — legacy single-photo direct save (no generation).
 
 import { createClient } from 'npm:@supabase/supabase-js@2'
 import { z } from 'npm:zod@3'
@@ -27,11 +26,25 @@ const IMAGE_MODELS = [
 ]
 
 const CANDIDATE_COUNT = 3
+
+// Each generate call costs CANDIDATE_COUNT image generations on our key.
+// Enrollment normally happens once; this bounds a runaway loop, not real use.
+const DAILY_AVATAR_GENERATES = 5
 const MAX_PHOTOS = 4 // model ceiling for character-consistency references
 
+// Base64 is ~1.37x the byte size it encodes. 10M chars ~ 7.5MB per image, which
+// is far above a 1024px JPEG and far below anything that should reach a model
+// API. Unbounded before: the client downscales, but the server is what a
+// malicious client bypasses.
+const MAX_IMAGE_B64 = 10_000_000
+
+// Whitelisted rather than free text — mimeType was passed straight through to
+// the model API.
+const ImageMime = z.enum(['image/jpeg', 'image/png', 'image/webp'])
+
 const PhotoSchema = z.object({
-  base64: z.string().min(1),
-  mimeType: z.string().default('image/jpeg'),
+  base64: z.string().min(1).max(MAX_IMAGE_B64),
+  mimeType: ImageMime.default('image/jpeg'),
 })
 
 const MeasurementFields = {
@@ -53,11 +66,6 @@ const CommitSchema = z.object({
 })
 
 // Legacy path — a single photo saved directly with no generation step.
-const LegacySchema = z.object({
-  photoBase64: z.string().min(1),
-  photoMimeType: z.string().default('image/jpeg'),
-  ...MeasurementFields,
-})
 
 /** Soft, qualitative build hint. Deliberately not a numeric instruction — image models
  *  cannot be steered precisely by measurements, and pretending otherwise produces
@@ -169,6 +177,29 @@ Deno.serve(async (req) => {
         return json({ error: 'Invalid request', details: parsed.error.issues }, 400)
       }
       const { photos, heightCm, weightKg } = parsed.data
+
+      // Cost guard. Enrollment is deliberately exempt from try_on_count, which
+      // left it exempt from EVERY limit — and each 'generate' fans out to
+      // CANDIDATE_COUNT Gemini image requests billed to our key. An
+      // authenticated user could loop this and drain the budget with nothing
+      // anywhere to stop or even count it.
+      //
+      // Fails CLOSED. If the counter is unavailable we cannot bound the spend,
+      // and unbounded spend is the worse outcome. The message names the cause
+      // so a missing migration 010 is diagnosable rather than mysterious.
+      const { data: usedToday, error: rateError } = await admin.rpc('avatar_generates_today', {
+        p_user_id: user.id,
+      })
+      if (rateError) {
+        console.error('avatar_generates_today failed (is migration 010 applied?):', rateError.message)
+        return json({ error: 'Avatar generation is temporarily unavailable.' }, 503)
+      }
+      if ((usedToday ?? 0) >= DAILY_AVATAR_GENERATES) {
+        return json(
+          { error: `You've reached today's avatar limit (${DAILY_AVATAR_GENERATES}). Try again tomorrow.` },
+          429
+        )
+      }
 
       const geminiKey = Deno.env.get('GEMINI_API_KEY')?.trim()
       if (!geminiKey) return json({ error: 'Image generation is not configured.' }, 500)
@@ -354,45 +385,15 @@ Deno.serve(async (req) => {
       return json({ avatar: { ...avatar, signedPhotoUrl: await signed(storagePath) } })
     }
 
-    // ── POST legacy: single photo, saved as-is ───────────────────────────────
-    const parsed = LegacySchema.safeParse(body)
-    if (!parsed.success) {
-      return json({ error: 'Invalid request', details: parsed.error.issues }, 400)
-    }
-    const { name, photoBase64, photoMimeType, heightCm, weightKg } = parsed.data
-
-    const ext = photoMimeType.includes('png') ? 'png' : 'jpg'
-    const storagePath = `${user.id}/avatar.${ext}`
-
-    const { error: uploadError } = await admin.storage
-      .from('avatars')
-      .upload(storagePath, decode(photoBase64), { contentType: photoMimeType, upsert: true })
-    if (uploadError) {
-      return json({ error: 'Photo upload failed: ' + uploadError.message }, 500)
-    }
-
-    const { data: avatar, error: upsertError } = await supabase
-      .from('avatars')
-      .upsert(
-        {
-          user_id: user.id,
-          name,
-          photo_url: storagePath,
-          height_cm: heightCm ?? null,
-          weight_kg: weightKg ?? null,
-        },
-        { onConflict: 'user_id' }
-      )
-      .select()
-      .single()
-
-    if (upsertError) return json({ error: upsertError.message }, 500)
-
-    await admin.from('usage_logs').insert({
-      user_id: user.id, action: 'avatar_save', success: true,
-    })
-
-    return json({ avatar: { ...avatar, signedPhotoUrl: await signed(storagePath) } })
+    // The legacy single-photo direct-save path was REMOVED.
+    //
+    // It wrote the user's uploaded photograph to storage verbatim. Every other
+    // path stores only the AI-generated avatar and discards the original, and
+    // the privacy policy now states that — an endpoint contradicting it, still
+    // reachable by anyone holding a token even though no client has called it
+    // since the generate/commit flow shipped, would make the policy untrue.
+    // 410 Gone rather than 404: it existed and was withdrawn.
+    return json({ error: 'This endpoint has been removed. Use action: \'generate\'.' }, 410)
 
   } catch (error) {
     return json({ error: (error as Error).message }, 500)

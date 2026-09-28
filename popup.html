@@ -124,6 +124,17 @@
           </ul>
         </div>
 
+        <div class="consent-box">
+          <label class="consent-label">
+            <input type="checkbox" id="avatar-consent">
+            <span>
+              I agree that my photo will be sent to <strong>Google's Gemini API</strong> to generate
+              my avatar. My original photo is not stored — only the avatar I choose.
+              <a href="https://aakanksha3010.github.io/aura-extension/" target="_blank" rel="noopener">Privacy policy</a>
+            </span>
+          </label>
+        </div>
+
         <p id="avatar-form-error" class="photo-required-msg hidden"></p>
 
         <button type="button" class="primary-btn" id="save-avatar-btn">Generate Avatar</button>
@@ -199,6 +210,14 @@
       </div>
       <div class="modal-body">
         <button id="sign-out-btn" class="secondary-btn" style="width:100%">Sign Out</button>
+
+        <div class="settings-section">
+          <h4 class="settings-heading">Your data</h4>
+          <p id="data-summary" class="settings-note">Loading…</p>
+          <a class="settings-link" href="https://aakanksha3010.github.io/aura-extension/" target="_blank" rel="noopener">Read the privacy policy</a>
+          <button id="delete-account-btn" class="danger-btn">Delete my account and data</button>
+          <p id="delete-status" class="settings-note hidden"></p>
+        </div>
       </div>
     </div>
   </div>
