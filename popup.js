@@ -391,7 +391,12 @@ function toggleSelection(id) {
 // Enrollment is a three-pane flow — form → progress → candidate picker — driven by
 // `avatarPane` so switching tabs mid-flow can never strand the user on a dead screen.
 
-const MIN_PHOTOS = 2;                 // multi-photo is the point: one photo is the old flow
+// One photo is enough to generate an avatar — the server accepts min(1) and
+// blocking on a second is onboarding friction before the user has seen anything
+// work. Extra photos genuinely help identity consistency, so they are encouraged
+// in the label copy rather than required.
+const MIN_PHOTOS = 1;
+const RECOMMENDED_PHOTOS = 2;
 const MAX_PHOTOS = 4;                 // server ceiling (model character-reference limit)
 const MAX_FILE_BYTES = 12 * 1024 * 1024;
 // Ported from the single-photo validator: a bad photo fails at generation time
@@ -567,9 +572,9 @@ function setUploadLabel(text) {
     return;
   }
   const n = avatarPhotos.length;
-  if (n === 0) el.textContent = `Upload ${MIN_PHOTOS}–${MAX_PHOTOS} photos`;
+  if (n === 0) el.textContent = `Upload a photo (up to ${MAX_PHOTOS})`;
   else if (n >= MAX_PHOTOS) el.textContent = `${n} photos — remove one to swap`;
-  else if (n < MIN_PHOTOS) el.textContent = `${n} photo — add at least ${MIN_PHOTOS - n} more`;
+  else if (n < RECOMMENDED_PHOTOS) el.textContent = `${n} photo — add another for a closer likeness`;
   else el.textContent = `${n} photos — add up to ${MAX_PHOTOS - n} more`;
 }
 
@@ -599,9 +604,7 @@ async function handleAvatarGenerate() {
   clearAvatarError();
 
   if (avatarPhotos.length < MIN_PHOTOS) {
-    showAvatarError(
-      `Add at least ${MIN_PHOTOS} photos — using several is what keeps your face consistent across the generated avatars.`
-    );
+    showAvatarError('Add a photo of yourself to generate your avatar.');
     return;
   }
 
