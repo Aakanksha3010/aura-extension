@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Privacy Policy — Aura Virtual Try-On</title>
+<style>
+  :root {
+    --ground: #ffffff;
+    --ink: #1a1d21;
+    --ink-soft: #4a525c;
+    --rule: #e2e6ea;
+    --accent: #0f6e68;
+    --warn-bg: #f7f3e8;
+    --warn-line: #b08423;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground: #101317;
+      --ink: #e8ecf0;
+      --ink-soft: #a6b0ba;
+      --rule: #272d34;
+      --accent: #4fc2b8;
+      --warn-bg: #221d12;
+      --warn-line: #c99a3c;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font: 17px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    margin: 0;
+    padding: 0 22px 90px;
+    -webkit-font-smoothing: antialiased;
+  }
+  main { max-width: 720px; margin: 0 auto; }
+  header { padding: 64px 0 28px; border-bottom: 2px solid var(--ink); margin-bottom: 40px; }
+  h1 { font-size: 34px; line-height: 1.15; margin: 0 0 10px; letter-spacing: -0.02em; }
+  .sub { color: var(--ink-soft); margin: 0; font-size: 15px; }
+  h2 {
+    font-size: 13px; text-transform: uppercase; letter-spacing: 0.1em;
+    margin: 44px 0 14px; padding-bottom: 8px; border-bottom: 1px solid var(--rule);
+  }
+  h3 { font-size: 18px; margin: 26px 0 8px; }
+  p, li { color: var(--ink); }
+  p { margin: 0 0 15px; }
+  ul { padding-left: 22px; margin: 0 0 15px; }
+  li { margin-bottom: 8px; }
+  a { color: var(--accent); }
+  strong { font-weight: 650; }
+  .note {
+    background: var(--warn-bg); border-left: 4px solid var(--warn-line);
+    padding: 16px 18px; margin: 0 0 20px; font-size: 16px;
+  }
+  .scroll { overflow-x: auto; margin-bottom: 20px; }
+  table { border-collapse: collapse; width: 100%; font-size: 15.5px; min-width: 520px; }
+  th, td { text-align: left; padding: 10px 14px 10px 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th { font-size: 12px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--ink-soft); }
+  footer { margin-top: 56px; padding-top: 18px; border-top: 1px solid var(--rule); color: var(--ink-soft); font-size: 14px; }
+  code { background: var(--rule); padding: 1px 5px; border-radius: 3px; font-size: 0.87em; }
+</style>
+</head>
+<body>
+<main>
+
+<header>
+  <h1>Aura Privacy Policy</h1>
+  <p class="sub">Aura — Virtual Try-On (Chrome Extension) · Effective 27 September 2026</p>
+</header>
+
+<p>
+  Aura lets you save clothes from any fashion website and see them on an AI-generated avatar of
+  yourself. Doing that requires a photo of you, so this policy explains plainly what we collect,
+  where it goes, who else sees it, and how to get rid of it.
+</p>
+
+<div class="note">
+  <strong>The short version.</strong> We collect your name and email from Google sign-in, the photo
+  you upload to create your avatar, the clothing items you choose to save, and a log of your try-ons.
+  Your photo is sent to Google's Gemini API to generate your avatar and is <em>not</em> kept
+  afterwards. We do not track your browsing, we do not sell your data, and we show no advertising.
+  You can delete everything from inside the extension at any time.
+</div>
+
+<h2>Who we are</h2>
+<p>
+  Aura is an independent project built and operated by Aakanksha Singh. For any privacy question,
+  or to request your data or its deletion, email
+  <a href="mailto:aakankshagyan3010@gmail.com">aakankshagyan3010@gmail.com</a>.
+</p>
+
+<h2>What we collect, and why</h2>
+
+<div class="scroll">
+<table>
+  <thead>
+    <tr><th>Data</th><th>Why we need it</th><th>When</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Name and email address</strong></td>
+      <td>To create your account and keep your wardrobe attached to you across sessions and devices.</td>
+      <td>From Google when you sign in</td>
+    </tr>
+    <tr>
+      <td><strong>A photograph of you</strong></td>
+      <td>To generate your avatar. This is the only reason we ask for it.</td>
+      <td>Only when you set up your avatar</td>
+    </tr>
+    <tr>
+      <td><strong>Your generated avatar</strong></td>
+      <td>It is the base image every try-on is rendered onto.</td>
+      <td>Stored until you delete it</td>
+    </tr>
+    <tr>
+      <td><strong>Saved clothing items</strong> — product name, brand, price, product page address and product image</td>
+      <td>To build your wardrobe and render try-ons.</td>
+      <td>Only for items you explicitly save</td>
+    </tr>
+    <tr>
+      <td><strong>Try-on results</strong></td>
+      <td>So your saved looks are there when you come back.</td>
+      <td>Stored until you delete them</td>
+    </tr>
+    <tr>
+      <td><strong>Activity records</strong> — what action, which AI model, whether it worked, and when</td>
+      <td>To enforce your free try-on allowance and to diagnose failures.</td>
+      <td>Each try-on or avatar generation</td>
+    </tr>
+    <tr>
+      <td><strong>Purchase records</strong> — amount, status and a payment reference</td>
+      <td>To credit the try-ons you paid for and to support refunds.</td>
+      <td>Only if you buy a credit pack</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<h2>About your photograph</h2>
+<p>
+  This is the most sensitive thing Aura handles, so we are specific about it.
+</p>
+<ul>
+  <li>
+    Your photo is uploaded only when you choose to create an avatar. Nothing is captured
+    automatically, and Aura never accesses your camera.
+  </li>
+  <li>
+    It is sent to <strong>Google's Gemini API</strong>, which generates several candidate avatars.
+    You pick one.
+  </li>
+  <li>
+    <strong>We do not store your original photograph.</strong> Only the AI-generated avatar you
+    select is saved. The candidates you did not pick are deleted.
+  </li>
+  <li>
+    When you run a try-on, your <em>avatar</em> and the garment images are sent to Google's Gemini
+    API. If that fails, they may instead be sent to <strong>fal.ai</strong>, which runs the FASHN
+    try-on model as a fallback.
+  </li>
+  <li>
+    Your avatar and try-on images are kept in private storage. They are not publicly listable, and
+    are served only through short-lived links issued to your signed-in session.
+  </li>
+</ul>
+
+<h2>What we do not do</h2>
+<ul>
+  <li>
+    <strong>We do not track your browsing.</strong> Aura can run on any website because clothes are
+    sold on many websites — but it reads a page only at the moment you click <em>Scan</em> or use the
+    right-click menu. It does not run in the background, does not record the pages you visit, and
+    sends nothing anywhere unless you ask it to save an item.
+  </li>
+  <li><strong>We do not sell or rent your data</strong> to anyone, for any purpose.</li>
+  <li><strong>We show no advertising</strong> and use no advertising or analytics trackers.</li>
+  <li><strong>We never see your card details.</strong> Payments happen on Razorpay's own hosted page; we receive only the amount, the status and a reference number.</li>
+  <li><strong>We do not use your photos or avatars to train AI models</strong> of our own.</li>
+</ul>
+
+<h2>Who else processes your data</h2>
+<p>Aura is a small project built on other companies' infrastructure. These are all of them:</p>
+<ul>
+  <li>
+    <strong>Google</strong> — sign-in, and the Gemini API that generates your avatar and try-ons.
+    See the <a href="https://ai.google.dev/gemini-api/terms" rel="noopener">Gemini API terms</a> and
+    <a href="https://policies.google.com/privacy" rel="noopener">Google Privacy Policy</a>.
+  </li>
+  <li>
+    <strong>Supabase</strong> — our database, file storage and authentication.
+    See the <a href="https://supabase.com/privacy" rel="noopener">Supabase Privacy Policy</a>.
+  </li>
+  <li>
+    <strong>fal.ai</strong> — the fallback try-on model, used only when the primary one fails.
+    See the <a href="https://fal.ai/privacy" rel="noopener">fal.ai Privacy Policy</a>.
+  </li>
+  <li>
+    <strong>Razorpay</strong> — payment processing, only if you buy a credit pack.
+    See the <a href="https://razorpay.com/privacy/" rel="noopener">Razorpay Privacy Policy</a>.
+  </li>
+</ul>
+
+<h2>Where your data is stored</h2>
+<p>
+  Your account data and images are stored on Supabase infrastructure hosted in
+  <strong>Seoul, South Korea</strong>. Our AI processing partners may process your images in other
+  countries. If you are using Aura from elsewhere, including India or the EU, your data is
+  transferred and processed outside your country.
+</p>
+
+<h2>How long we keep it</h2>
+<ul>
+  <li>Your account, avatar, wardrobe and saved looks are kept <strong>until you delete them</strong>.</li>
+  <li>Activity records are kept while your account exists, and are removed with it.</li>
+  <li>
+    Purchase records may be retained after deletion where we are required to keep them for tax or
+    accounting purposes. These contain an amount and a reference number, not your images.
+  </li>
+</ul>
+
+<h2>Your choices and rights</h2>
+<p>
+  You can do both of these yourself, from <strong>Settings</strong> inside the extension:
+</p>
+<ul>
+  <li><strong>See what we hold.</strong> A summary of your account, avatar, wardrobe size and purchase history.</li>
+  <li>
+    <strong>Delete everything.</strong> This removes your account, your avatar, every image, your
+    wardrobe, your saved looks and your activity records. It is immediate and cannot be undone.
+  </li>
+</ul>
+<p>
+  You can also email <a href="mailto:aakankshagyan3010@gmail.com">aakankshagyan3010@gmail.com</a> and
+  we will do it for you. Depending on where you live you may have additional rights — to access,
+  correct, export or restrict the use of your data, or to complain to a data protection authority.
+  We honour those requests regardless of where you live.
+</p>
+<p>
+  You can also revoke Aura's access to your Google account at any time from your
+  <a href="https://myaccount.google.com/permissions" rel="noopener">Google account permissions</a>.
+  That stops future sign-ins but does not delete data we already hold — use the deletion option for that.
+</p>
+
+<h2>Children</h2>
+<p>
+  Aura is not intended for anyone under 18, and we do not knowingly collect data from children. If
+  you believe a child has created an account, email us and we will delete it.
+</p>
+
+<h2>Security</h2>
+<p>
+  Image storage is private by default and access is restricted per account at the database level, so
+  one account cannot read another's files. Traffic is encrypted in transit. No system is perfectly
+  secure, and we will not claim otherwise — but your photos are not public, not shared, and not for sale.
+</p>
+
+<h2>Changes to this policy</h2>
+<p>
+  If this policy changes in a way that materially affects you, we will update the effective date
+  above and note the change in the extension before it takes effect.
+</p>
+
+<footer>
+  Last updated 27 September 2026 · Questions:
+  <a href="mailto:aakankshagyan3010@gmail.com">aakankshagyan3010@gmail.com</a>
+</footer>
+
+</main>
+</body>
+</html>
