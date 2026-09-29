@@ -116,6 +116,56 @@ ok('credit grant is guarded by credits_granted_at',
    /credits_granted_at\s+is\s+null/i.test(packSql),
    'the guard must be inside the UPDATE, not a read-then-write in the edge function');
 
+// ── 3b. Nullable-column hazards ──────────────────────────────────────────────
+//
+// profiles.try_on_limit and try_on_count are NULLABLE in the live schema
+// (default 25 and 0, but the columns permit NULL). Arithmetic and comparison
+// against NULL fail silently rather than loudly, and both failures cost a user
+// something they paid for.
+
+ok('credit grant is NULL-safe',
+   /set try_on_limit\s*=\s*coalesce\(try_on_limit,\s*0\)\s*\+/i.test(packSql),
+   'NULL + credits = NULL, and credits_granted_at is already stamped — the user pays and gets nothing, with no retry possible');
+
+const quotaSql = read('supabase/migrations/010_quota_integrity.sql');
+ok('quota consume is NULL-safe',
+   /coalesce\(try_on_count,\s*0\)\s*<\s*coalesce\(try_on_limit,\s*0\)/i.test(quotaSql),
+   'NULL < NULL is NULL, not true — a NULL column would lock the user out of every try-on permanently');
+ok('quota increment is NULL-safe',
+   /set try_on_count\s*=\s*coalesce\(try_on_count,\s*0\)\s*\+\s*1/i.test(quotaSql));
+
+// ── 3c. Migrations are re-runnable ───────────────────────────────────────────
+//
+// Remote schema_migrations is empty, so these are applied by hand in the SQL
+// editor. A half-applied file that cannot be re-run leaves the database in a
+// state needing manual repair.
+
+for (const [file, sql] of [['009', packSql], ['010', quotaSql], ['011', read('supabase/migrations/011_revoke_profile_writes.sql')]]) {
+  const bareCreates = [...sql.matchAll(/^create\s+(table|index|policy)\s+(?!if not exists)/gim)]
+    .map(m => m[1]);
+  // A bare CREATE POLICY is fine if a DROP POLICY IF EXISTS precedes it.
+  const unguarded = bareCreates.filter(kind =>
+    kind.toLowerCase() !== 'policy' || !/drop policy if exists/i.test(sql));
+  ok(`migration ${file} is re-runnable`, unguarded.length === 0,
+     `unguarded: ${unguarded.join(', ')} — a re-run hard-fails on an already-applied object`);
+}
+
+// ── 3d. The revoke lands after the deploy, not with the functions ────────────
+//
+// The tryon deployed before this work discards the result of its profiles
+// UPDATE, so a permission denial is swallowed: try-on keeps working while
+// metering silently stops. Revoking in the same migration that defines the
+// replacement functions would open that window.
+
+const revokeSql = read('supabase/migrations/011_revoke_profile_writes.sql');
+ok('the profiles revoke is isolated in its own migration',
+   /revoke\s+update\s+on\s+profiles/i.test(revokeSql) &&
+   !/revoke\s+update\s+on\s+profiles/i.test(quotaSql),
+   'bundling it with the function definitions creates a fail-open metering gap');
+ok('INSERT on profiles is revoked too',
+   /revoke\s+insert\s+on\s+profiles\s+from[^;]*authenticated/i.test(revokeSql),
+   'authenticated held INSERT on every column, and the policy has no WITH CHECK');
+
 // ── 4. The server owns the price ─────────────────────────────────────────────
 
 const billing = read('supabase/functions/billing/index.ts');
