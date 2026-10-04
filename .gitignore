@@ -14,3 +14,11 @@ node_modules/
 key.pem
 
 dist/
+
+# Secrets written by third-party setup wizards and SDKs. Braintrust, Supabase
+# and most CLIs drop an API key into one of these without asking — and this
+# repo is public.
+.env
+.env.*
+!.env.example
+.braintrust/

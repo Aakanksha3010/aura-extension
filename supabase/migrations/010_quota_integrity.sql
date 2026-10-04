@@ -22,8 +22,16 @@
 -- changing. Quota moves behind security-definer functions callable only by
 -- the service role.
 
-revoke update on profiles from anon, authenticated;
-grant  update (name) on profiles to authenticated;
+-- NOTE: the actual REVOKE lives in migration 011, deliberately.
+--
+-- Applying it here would break metering the moment it ran: the currently
+-- deployed tryon does `await supabase.from('profiles').update(...)` with no
+-- error destructure, so a permission denial is SILENTLY DISCARDED. Try-on
+-- keeps returning images while try_on_count stops incrementing — it fails
+-- OPEN, into unlimited free generations billed to our key, invisibly.
+--
+-- So: this migration (inert — nothing calls these functions yet) → deploy the
+-- new functions → then 011 revokes. That ordering has no exposed window at all.
 
 -- Atomically reserve one try-on. Returns false if the user is at their limit.
 --
@@ -41,10 +49,13 @@ declare
   v_ok boolean;
 begin
   update profiles
-     set try_on_count = try_on_count + 1,
+     set try_on_count = coalesce(try_on_count, 0) + 1,
          updated_at   = now()
    where id = p_user_id
-     and try_on_count < try_on_limit
+     -- coalesce: both columns are nullable, and `NULL < NULL` is NULL, which
+     -- is not true — so a NULL on either side would silently lock the user out
+     -- of every try-on forever rather than failing loudly.
+     and coalesce(try_on_count, 0) < coalesce(try_on_limit, 0)
   returning true into v_ok;
 
   return coalesce(v_ok, false);

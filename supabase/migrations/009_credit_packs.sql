@@ -6,7 +6,7 @@
 -- period, and no cancellation. Reusing it would mean carrying columns that
 -- are permanently null and a status vocabulary that doesn't apply.
 
-create table payments (
+create table if not exists payments (
   id                       uuid primary key default gen_random_uuid(),
   user_id                  uuid not null references profiles(id) on delete cascade,
 
@@ -35,7 +35,7 @@ create table payments (
   paid_at                  timestamptz
 );
 
-create index payments_user_idx on payments (user_id, created_at desc);
+create index if not exists payments_user_idx on payments (user_id, created_at desc);
 
 alter table payments enable row level security;
 
@@ -43,6 +43,7 @@ alter table payments enable row level security;
 -- exists by design — rows are written only by the billing and webhook
 -- functions via the service role, which bypasses RLS. A client that could
 -- insert its own 'paid' row could grant itself credits.
+drop policy if exists "own payments read" on payments;
 create policy "own payments read" on payments
   for select using (auth.uid() = user_id);
 
@@ -81,8 +82,13 @@ begin
     return false;   -- unknown link, or already granted
   end if;
 
+  -- coalesce, because profiles.try_on_limit is NULLABLE (default 25, but the
+  -- column permits NULL). NULL + credits = NULL, and the guard above has
+  -- already stamped credits_granted_at — so the user would have paid, received
+  -- nothing, and be permanently blocked from a retry. Unrecoverable without
+  -- manual intervention.
   update profiles
-     set try_on_limit = try_on_limit + v_credits,
+     set try_on_limit = coalesce(try_on_limit, 0) + v_credits,
          updated_at   = now()
    where id = v_user_id;
 
